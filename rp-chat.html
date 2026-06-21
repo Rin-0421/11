@@ -1,0 +1,926 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>RP Chat</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #0d0b12;
+  --surface: #1a1525;
+  --surface2: #221c30;
+  --border: #2d2540;
+  --accent: #b388ff;
+  --accent-dim: #7c4dff;
+  --text: #e8e0f0;
+  --text-dim: #9b8cb0;
+  --user-bubble: #2d2048;
+  --ai-bubble: #1a1525;
+  --danger: #f87171;
+  --green: #86efac;
+}
+body {
+  font-family: -apple-system, 'Segoe UI', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 3px; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+/* ── Common ── */
+.finput {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 14px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  outline: none;
+  font-family: inherit;
+  margin-bottom: 10px;
+  transition: border-color .15s;
+}
+.finput:focus { border-color: var(--accent); }
+.finput::placeholder { color: var(--text-dim); opacity: .65; }
+
+.ftextarea {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 13px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  outline: none;
+  font-family: inherit;
+  resize: vertical;
+  line-height: 1.55;
+  transition: border-color .15s;
+}
+.ftextarea:focus { border-color: var(--accent); }
+.ftextarea::placeholder { color: var(--text-dim); opacity: .65; }
+
+.lbl { font-size: 12px; color: var(--text-dim); margin-bottom: 5px; display: block; }
+
+.btn-primary {
+  width: 100%;
+  padding: 12px;
+  background: linear-gradient(135deg, var(--accent-dim), #5e008f);
+  color: #fff;
+  border: none;
+  border-radius: 11px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity .15s;
+}
+.btn-primary:hover { opacity: .88; }
+
+.btn-sm {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 12px;
+  padding: 5px 11px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: border-color .15s, color .15s;
+}
+.btn-sm:hover { border-color: var(--accent); color: var(--accent); }
+
+.btn-danger {
+  width: 100%;
+  padding: 11px;
+  background: none;
+  border: 1px solid var(--danger);
+  color: var(--danger);
+  border-radius: 10px;
+  font-size: 14px;
+  cursor: pointer;
+  margin-top: 10px;
+  transition: background .15s;
+}
+.btn-danger:hover { background: rgba(248,113,113,.1); }
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 18px;
+  width: 100%;
+  max-width: 500px;
+  margin-bottom: 12px;
+}
+.card-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .09em;
+  color: var(--accent);
+  margin-bottom: 13px;
+  font-weight: 600;
+}
+
+.fselect {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 13px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  outline: none;
+  cursor: pointer;
+}
+.fselect:focus { border-color: var(--accent); }
+
+.err { color: var(--danger); font-size: 12px; margin-top: 6px; display: none; max-width: 500px; width: 100%; }
+
+/* ── Avatar ── */
+.av-circle {
+  width: 58px; height: 58px;
+  border-radius: 50%;
+  background: var(--surface2);
+  border: 2px solid var(--border);
+  overflow: hidden;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: border-color .15s;
+  font-size: 22px;
+}
+.av-circle:hover { border-color: var(--accent); }
+.av-circle img { width: 100%; height: 100%; object-fit: cover; }
+.av-row { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+.av-info p { font-size: 13px; color: var(--text-dim); margin-bottom: 7px; }
+
+/* ── Setup ── */
+#setup {
+  flex: 1;
+  overflow-y: auto;
+  padding: 28px 18px 48px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.setup-hdr { text-align: center; margin-bottom: 22px; }
+.setup-hdr h1 {
+  font-size: 24px; font-weight: 700;
+  background: linear-gradient(135deg, #b388ff, #e040fb);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  margin-bottom: 4px;
+}
+.setup-hdr p { color: var(--text-dim); font-size: 13px; }
+
+/* Knowledge docs */
+.doc-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+.doc-item {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 9px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.doc-item-name { font-size: 13px; color: var(--text); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.doc-item-count { font-size: 11px; color: var(--text-dim); flex-shrink: 0; }
+.doc-rm-btn {
+  background: none; border: none;
+  color: var(--text-dim); cursor: pointer;
+  font-size: 15px; padding: 0 2px;
+  transition: color .15s; flex-shrink: 0;
+}
+.doc-rm-btn:hover { color: var(--danger); }
+
+.add-doc-form { border-top: 1px solid var(--border); margin-top: 10px; padding-top: 12px; }
+.add-doc-row { display: flex; gap: 7px; margin-bottom: 7px; }
+.add-doc-row .finput { margin-bottom: 0; flex: 1; }
+
+/* ── Chat ── */
+#chat { flex: 1; display: none; flex-direction: column; overflow: hidden; }
+
+.chat-header {
+  display: flex; align-items: center; gap: 10px;
+  padding: 11px 14px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.hdr-av {
+  width: 36px; height: 36px; border-radius: 50%;
+  background: var(--surface2); overflow: hidden; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; font-size: 17px;
+}
+.hdr-av img { width: 100%; height: 100%; object-fit: cover; }
+.hdr-name { font-size: 15px; font-weight: 600; flex: 1; }
+.hdr-btns { display: flex; gap: 6px; align-items: center; }
+.hdr-select {
+  background: var(--bg); border: 1px solid var(--border);
+  color: var(--text-dim); font-size: 11px; padding: 4px 7px;
+  border-radius: 6px; outline: none; cursor: pointer;
+}
+.hdr-select:focus { border-color: var(--accent); }
+.icon-btn {
+  background: none; border: none; color: var(--text-dim);
+  cursor: pointer; padding: 6px; border-radius: 8px;
+  font-size: 16px; display: flex; align-items: center;
+  transition: color .15s, background .15s;
+}
+.icon-btn:hover { color: var(--accent); background: var(--surface2); }
+
+#messages {
+  flex: 1; overflow-y: auto;
+  padding: 14px 13px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+
+.msg-row { display: flex; align-items: flex-end; gap: 7px; }
+.msg-row.user { justify-content: flex-end; }
+.msg-row.assistant { justify-content: flex-start; }
+
+.msg-av {
+  width: 28px; height: 28px; border-radius: 50%;
+  background: var(--surface2); overflow: hidden; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; font-size: 13px;
+}
+.msg-av img { width: 100%; height: 100%; object-fit: cover; }
+
+.msg-col { display: flex; flex-direction: column; max-width: 74%; }
+.msg-name { font-size: 11px; color: var(--text-dim); margin-bottom: 3px; padding-left: 2px; }
+
+.bubble {
+  padding: 9px 13px; border-radius: 18px;
+  font-size: 14px; line-height: 1.6;
+  white-space: pre-wrap; word-break: break-word;
+}
+.msg-row.assistant .bubble {
+  background: var(--ai-bubble); border: 1px solid var(--border);
+  border-bottom-left-radius: 4px;
+}
+.msg-row.user .bubble {
+  background: var(--user-bubble); border-bottom-right-radius: 4px;
+}
+.bubble.typing { color: var(--text-dim); font-style: italic; }
+
+.msg-img { max-width: 180px; max-height: 180px; border-radius: 10px; display: block; margin-bottom: 5px; }
+.pdf-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 7px; padding: 5px 9px;
+  font-size: 12px; color: var(--text-dim); margin-bottom: 5px;
+}
+
+/* Input area */
+.input-area {
+  padding: 9px 13px 15px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+#file-preview {
+  display: none; align-items: center; gap: 8px;
+  margin-bottom: 7px; background: var(--surface2);
+  border: 1px solid var(--border); border-radius: 10px; padding: 7px 10px;
+}
+#file-preview img { width: 32px; height: 32px; object-fit: cover; border-radius: 5px; }
+.fp-icon { font-size: 22px; }
+.fp-name { flex: 1; font-size: 12px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fp-rm { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 15px; transition: color .15s; }
+.fp-rm:hover { color: var(--danger); }
+
+.input-row { display: flex; gap: 7px; align-items: flex-end; }
+#user-input {
+  flex: 1; background: var(--bg); border: 1px solid var(--border);
+  color: var(--text); font-size: 14px; padding: 10px 13px;
+  border-radius: 22px; outline: none; resize: none;
+  min-height: 42px; max-height: 130px;
+  font-family: inherit; line-height: 1.5; transition: border-color .15s;
+}
+#user-input:focus { border-color: var(--accent); }
+#user-input::placeholder { color: var(--text-dim); opacity: .65; }
+
+.attach-btn {
+  width: 40px; height: 40px; background: var(--surface2);
+  border: 1px solid var(--border); border-radius: 50%;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; font-size: 18px; color: var(--text-dim);
+  transition: border-color .15s, color .15s;
+}
+.attach-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+.send-btn {
+  width: 40px; height: 40px;
+  background: linear-gradient(135deg, var(--accent-dim), #5e008f);
+  border: none; border-radius: 50%; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; transition: opacity .15s, transform .1s;
+}
+.send-btn:hover { opacity: .85; }
+.send-btn:active { transform: scale(.92); }
+.send-btn:disabled { background: var(--border); cursor: not-allowed; }
+.send-btn svg { width: 17px; height: 17px; fill: white; }
+
+/* Settings panel */
+#settings-panel {
+  display: none; position: fixed; inset: 0;
+  background: rgba(0,0,0,.72); z-index: 100; align-items: flex-end;
+}
+#settings-panel.open { display: flex; }
+.settings-sheet {
+  background: var(--surface); border-top: 1px solid var(--border);
+  border-radius: 20px 20px 0 0; width: 100%;
+  max-height: 90dvh; overflow-y: auto;
+  padding: 18px 20px 48px;
+}
+.sh-handle { width: 34px; height: 4px; background: var(--border); border-radius: 2px; margin: 0 auto 18px; }
+.sh-title { font-size: 16px; font-weight: 700; margin-bottom: 16px; }
+.sh-sec {
+  font-size: 11px; text-transform: uppercase;
+  letter-spacing: .08em; color: var(--accent);
+  margin-bottom: 7px; margin-top: 16px; font-weight: 600;
+}
+.sh-sec:first-of-type { margin-top: 0; }
+
+/* io buttons row */
+.io-row { display: flex; gap: 8px; margin-top: 10px; }
+.io-row .btn-sm { flex: 1; text-align: center; }
+.btn-green {
+  flex: 1; text-align: center;
+  background: none; border: 1px solid var(--green);
+  color: var(--green); font-size: 12px;
+  padding: 5px 11px; border-radius: 7px; cursor: pointer;
+  transition: background .15s;
+}
+.btn-green:hover { background: rgba(134,239,172,.1); }
+</style>
+</head>
+<body>
+
+<!-- ══════════ SETUP ══════════ -->
+<div id="setup">
+  <div class="setup-hdr">
+    <h1>✦ RP Chat</h1>
+    <p>設定你的角色與場景</p>
+  </div>
+
+  <div class="card">
+    <div class="card-title">API 金鑰</div>
+    <input class="finput" type="password" id="api-key-input" placeholder="sk-ant-api03-…" autocomplete="off">
+  </div>
+
+  <div class="card">
+    <div class="card-title">角色設定</div>
+    <div class="av-row">
+      <div class="av-circle" id="s-av-btn">
+        <span id="s-av-ph">🎭</span>
+        <img id="s-av-img" style="display:none">
+      </div>
+      <div class="av-info">
+        <p>點擊圓圈上傳角色頭像</p>
+        <button class="btn-sm" id="s-av-upload-btn">選擇圖片</button>
+      </div>
+    </div>
+    <input type="file" id="s-av-file" accept="image/*" style="display:none">
+    <label class="lbl">角色名稱</label>
+    <input class="finput" type="text" id="char-name-input" placeholder="薔薇、艾拉、Claude…">
+  </div>
+
+  <!-- Knowledge Docs -->
+  <div class="card">
+    <div class="card-title">角色知識文件</div>
+    <div class="doc-list" id="setup-doc-list"></div>
+    <div class="add-doc-form">
+      <div class="add-doc-row">
+        <input class="finput" type="text" id="new-doc-name" placeholder="文件名稱（例：世界觀設定）">
+        <button class="btn-sm" id="add-doc-btn">＋ 新增</button>
+      </div>
+      <textarea class="ftextarea" id="new-doc-content" style="min-height:80px" placeholder="貼入文字內容…"></textarea>
+    </div>
+  </div>
+
+  <!-- Custom Instruction -->
+  <div class="card">
+    <div class="card-title">自訂指令</div>
+    <textarea class="ftextarea" id="inst-input" style="min-height:88px" placeholder="給 AI 的行為規則…&#10;&#10;例：請用繁體中文回覆，每次回覆 2–4 段，保持角色不出戲，禁止加括號動作描述…"></textarea>
+  </div>
+
+  <div class="card">
+    <div class="card-title">模型</div>
+    <div style="display:flex;align-items:center;justify-content:space-between">
+      <label style="font-size:13px;color:var(--text-dim)">使用模型</label>
+      <select class="fselect" id="setup-model">
+        <option value="claude-haiku-4-5-20251001">Haiku 4.5（最省）</option>
+        <option value="claude-sonnet-4-6" selected>Sonnet 4.6（推薦）</option>
+        <option value="claude-opus-4-5">Opus 4.5（省 token）</option>
+        <option value="claude-opus-4-6">Opus 4.6（最強）</option>
+      </select>
+    </div>
+  </div>
+
+  <button class="btn-primary" id="start-btn">開始聊天 →</button>
+  <p class="err" id="setup-err">請填入有效的 API 金鑰（sk-ant-…）</p>
+</div>
+
+<!-- ══════════ CHAT ══════════ -->
+<div id="chat">
+  <div class="chat-header">
+    <div class="hdr-av" id="hdr-av">
+      <span id="hdr-av-ph">🎭</span>
+      <img id="hdr-av-img" style="display:none">
+    </div>
+    <span class="hdr-name" id="hdr-name">角色</span>
+    <div class="hdr-btns">
+      <select class="hdr-select" id="chat-model">
+        <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
+        <option value="claude-sonnet-4-6" selected>Sonnet 4.6</option>
+        <option value="claude-opus-4-5">Opus 4.5</option>
+        <option value="claude-opus-4-6">Opus 4.6</option>
+      </select>
+      <button class="icon-btn" id="settings-btn" title="設定">⚙</button>
+    </div>
+  </div>
+
+  <div id="messages"></div>
+
+  <div class="input-area">
+    <div id="file-preview">
+      <img id="fp-img" style="display:none">
+      <span class="fp-icon" id="fp-icon" style="display:none">📄</span>
+      <span class="fp-name" id="fp-name"></span>
+      <button class="fp-rm" id="fp-rm">✕</button>
+    </div>
+    <div class="input-row">
+      <button class="attach-btn" id="attach-btn" title="附加圖片或 PDF">📎</button>
+      <input type="file" id="file-input" accept="image/*,.pdf" style="display:none">
+      <textarea id="user-input" placeholder="輸入訊息…" rows="1"></textarea>
+      <button class="send-btn" id="send-btn">
+        <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ SETTINGS PANEL ══════════ -->
+<div id="settings-panel">
+  <div class="settings-sheet">
+    <div class="sh-handle"></div>
+    <div class="sh-title">設定</div>
+
+    <div class="sh-sec">角色頭像</div>
+    <div class="av-row" style="margin-bottom:8px">
+      <div class="av-circle" id="set-av-btn">
+        <span id="set-av-ph">🎭</span>
+        <img id="set-av-img" style="display:none">
+      </div>
+      <button class="btn-sm" id="set-av-upload-btn">更換頭像</button>
+    </div>
+    <input type="file" id="set-av-file" accept="image/*" style="display:none">
+
+    <div class="sh-sec">角色名稱</div>
+    <input class="finput" type="text" id="set-name" placeholder="角色名稱">
+
+    <div class="sh-sec">知識文件</div>
+    <div class="doc-list" id="set-doc-list"></div>
+    <div class="add-doc-form" style="border-top:1px solid var(--border);margin-top:8px;padding-top:10px">
+      <div class="add-doc-row">
+        <input class="finput" type="text" id="set-new-doc-name" placeholder="文件名稱">
+        <button class="btn-sm" id="set-add-doc-btn">＋ 新增</button>
+      </div>
+      <textarea class="ftextarea" id="set-new-doc-content" style="min-height:72px" placeholder="貼入文字內容…"></textarea>
+    </div>
+
+    <div class="sh-sec">自訂指令</div>
+    <textarea class="ftextarea" id="set-inst" style="min-height:80px;margin-top:8px" placeholder="自訂指令…"></textarea>
+
+    <button class="btn-primary" id="set-save-btn" style="margin-top:16px">儲存設定</button>
+
+    <div class="sh-sec">對話紀錄</div>
+    <div class="io-row">
+      <button class="btn-green" id="export-btn">📤 匯出 JSON</button>
+      <button class="btn-sm" id="import-trigger-btn">📥 匯入 JSON</button>
+    </div>
+    <input type="file" id="import-file" accept=".json" style="display:none">
+
+    <button class="btn-danger" id="clear-btn">清除對話紀錄</button>
+  </div>
+</div>
+
+<script>
+// ── State ──
+let apiKey = '', charName = '', avatarB64 = '', docs = [], instText = '';
+let history = [], pendingFile = null, isLoading = false;
+const SK = 'rp_v2';
+
+// ── Restore from localStorage ──
+try {
+  const s = JSON.parse(localStorage.getItem(SK) || 'null');
+  if (s && s.apiKey) {
+    apiKey = s.apiKey || '';
+    charName = s.charName || '';
+    avatarB64 = s.avatarB64 || '';
+    docs = s.docs || [];
+    instText = s.instText || '';
+    history = s.history || [];
+    const model = s.model || 'claude-sonnet-4-6';
+    document.getElementById('chat-model').value = model;
+    showChat();
+    renderHistory();
+  }
+} catch(e){}
+
+// ── Save ──
+function save() {
+  try {
+    localStorage.setItem(SK, JSON.stringify({
+      apiKey, charName, avatarB64, docs, instText, history,
+      model: document.getElementById('chat-model').value
+    }));
+  } catch(e){ alert('儲存失敗，可能是 localStorage 空間不足'); }
+}
+
+// ── Avatar helpers ──
+function setAv(imgId, phId, b64) {
+  const img = document.getElementById(imgId);
+  const ph = document.getElementById(phId);
+  if (b64) { img.src = b64; img.style.display = 'block'; ph.style.display = 'none'; }
+  else { img.style.display = 'none'; ph.style.display = 'block'; }
+}
+
+function bindAv(btnId, uploadId, fileId, imgId, phId) {
+  const click = () => document.getElementById(fileId).click();
+  document.getElementById(btnId).addEventListener('click', click);
+  document.getElementById(uploadId).addEventListener('click', click);
+  document.getElementById(fileId).addEventListener('change', e => {
+    const f = e.target.files[0]; if (!f) return;
+    toB64(f).then(b64 => { avatarB64 = b64; setAv(imgId, phId, b64); });
+  });
+}
+bindAv('s-av-btn','s-av-upload-btn','s-av-file','s-av-img','s-av-ph');
+
+// ── Render doc list ──
+function renderDocs(listId, nameInputId, contentInputId, addBtnId) {
+  const list = document.getElementById(listId);
+  list.innerHTML = '';
+  if (docs.length === 0) {
+    list.innerHTML = '<p style="font-size:12px;color:var(--text-dim);margin-bottom:6px">尚無文件</p>';
+    return;
+  }
+  docs.forEach((doc, i) => {
+    const item = document.createElement('div');
+    item.className = 'doc-item';
+    item.innerHTML = `
+      <span class="doc-item-name" title="${doc.name}">📄 ${doc.name}</span>
+      <span class="doc-item-count">${doc.content.length} 字</span>
+      <button class="doc-rm-btn" data-i="${i}">✕</button>
+    `;
+    item.querySelector('.doc-rm-btn').addEventListener('click', () => {
+      docs.splice(i, 1);
+      renderAllDocs();
+      save();
+    });
+    list.appendChild(item);
+  });
+}
+
+function renderAllDocs() {
+  renderDocs('setup-doc-list','new-doc-name','new-doc-content','add-doc-btn');
+  renderDocs('set-doc-list','set-new-doc-name','set-new-doc-content','set-add-doc-btn');
+}
+
+renderAllDocs();
+
+function addDoc(nameId, contentId) {
+  const name = document.getElementById(nameId).value.trim();
+  const content = document.getElementById(contentId).value.trim();
+  if (!name || !content) { alert('請填入文件名稱和內容'); return; }
+  docs.push({ name, content });
+  document.getElementById(nameId).value = '';
+  document.getElementById(contentId).value = '';
+  renderAllDocs();
+  save();
+}
+
+document.getElementById('add-doc-btn').addEventListener('click', () => addDoc('new-doc-name','new-doc-content'));
+document.getElementById('set-add-doc-btn').addEventListener('click', () => addDoc('set-new-doc-name','set-new-doc-content'));
+
+// ── Start ──
+document.getElementById('start-btn').addEventListener('click', () => {
+  const key = document.getElementById('api-key-input').value.trim();
+  if (!key.startsWith('sk-ant-')) {
+    document.getElementById('setup-err').style.display = 'block'; return;
+  }
+  document.getElementById('setup-err').style.display = 'none';
+  apiKey = key;
+  charName = document.getElementById('char-name-input').value.trim() || '角色';
+  instText = document.getElementById('inst-input').value.trim();
+  document.getElementById('chat-model').value = document.getElementById('setup-model').value;
+  save(); showChat();
+});
+
+function showChat() {
+  document.getElementById('setup').style.display = 'none';
+  document.getElementById('chat').style.display = 'flex';
+  document.getElementById('hdr-name').textContent = charName || '角色';
+  setAv('hdr-av-img','hdr-av-ph', avatarB64);
+  document.getElementById('user-input').focus();
+}
+
+// ── Render history ──
+function renderHistory() {
+  const el = document.getElementById('messages');
+  el.innerHTML = '';
+  for (const msg of history) {
+    if (msg.role === 'user') {
+      const text = typeof msg.content === 'string' ? msg.content
+        : msg.content.filter(b=>b.type==='text').map(b=>b.text).join('');
+      let extra = null;
+      if (Array.isArray(msg.content)) {
+        const ib = msg.content.find(b=>b.type==='image');
+        const db = msg.content.find(b=>b.type==='document');
+        if (ib) extra = { type:'image', src:`data:${ib.source.media_type};base64,${ib.source.data}` };
+        else if (db) extra = { type:'pdf', name:'PDF 文件' };
+      }
+      addBubble('user', text, false, extra);
+    } else {
+      addBubble('assistant', typeof msg.content === 'string' ? msg.content : '', false, null);
+    }
+  }
+  scrollBot();
+}
+
+// ── File attach ──
+document.getElementById('attach-btn').addEventListener('click', () => document.getElementById('file-input').click());
+document.getElementById('file-input').addEventListener('change', e => {
+  const f = e.target.files[0]; if (!f) return;
+  e.target.value = '';
+  const isPdf = f.type === 'application/pdf';
+  const isImg = f.type.startsWith('image/');
+  if (!isPdf && !isImg) return;
+  toB64(f).then(b64 => {
+    pendingFile = { type: isPdf?'pdf':'image', mime: f.type, data: b64.split(',')[1], src: b64, name: f.name };
+    showFP();
+  });
+});
+
+function showFP() {
+  document.getElementById('file-preview').style.display = 'flex';
+  document.getElementById('fp-name').textContent = pendingFile.name;
+  if (pendingFile.type === 'image') {
+    document.getElementById('fp-img').src = pendingFile.src;
+    document.getElementById('fp-img').style.display = 'block';
+    document.getElementById('fp-icon').style.display = 'none';
+  } else {
+    document.getElementById('fp-img').style.display = 'none';
+    document.getElementById('fp-icon').style.display = 'block';
+  }
+}
+
+document.getElementById('fp-rm').addEventListener('click', () => {
+  pendingFile = null;
+  document.getElementById('file-preview').style.display = 'none';
+});
+
+// ── Textarea resize ──
+const ui = document.getElementById('user-input');
+ui.addEventListener('input', () => { ui.style.height='auto'; ui.style.height=Math.min(ui.scrollHeight,130)+'px'; });
+ui.addEventListener('keydown', e => { if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();} });
+document.getElementById('send-btn').addEventListener('click', send);
+
+// ── Build system prompt ──
+function buildSystem() {
+  const parts = [];
+  if (docs.length > 0) {
+    parts.push('[知識文件]');
+    docs.forEach(d => parts.push(`## ${d.name}\n${d.content}`));
+  }
+  if (instText) parts.push('[指令]\n' + instText);
+  return parts.join('\n\n');
+}
+
+// ── Send ──
+async function send() {
+  const text = ui.value.trim();
+  if ((!text && !pendingFile) || isLoading) return;
+  isLoading = true;
+  document.getElementById('send-btn').disabled = true;
+  ui.value = ''; ui.style.height = 'auto';
+
+  let content, extra = null;
+  if (pendingFile) {
+    content = [];
+    if (pendingFile.type === 'image') {
+      content.push({ type:'image', source:{ type:'base64', media_type:pendingFile.mime, data:pendingFile.data } });
+      extra = { type:'image', src: pendingFile.src };
+    } else {
+      content.push({ type:'document', source:{ type:'base64', media_type:pendingFile.mime, data:pendingFile.data } });
+      extra = { type:'pdf', name: pendingFile.name };
+    }
+    if (text) content.push({ type:'text', text });
+    pendingFile = null;
+    document.getElementById('file-preview').style.display = 'none';
+  } else {
+    content = text;
+  }
+
+  history.push({ role:'user', content });
+  addBubble('user', text, false, extra);
+  save();
+
+  const tb = addBubble('assistant', '正在輸入…', true, null);
+
+  try {
+    const sys = buildSystem();
+    const body = {
+      model: document.getElementById('chat-model').value,
+      max_tokens: 1024,
+      messages: history,
+    };
+    if (sys) body.system = sys;
+
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(()=>({}));
+      throw new Error(err?.error?.message || `HTTP ${res.status}`);
+    }
+
+    const data = await res.json();
+    const reply = data.content?.[0]?.text || '（沒有回應）';
+    tb.querySelector('.bubble').classList.remove('typing');
+    tb.querySelector('.bt').textContent = reply;
+    history.push({ role:'assistant', content: reply });
+    save();
+  } catch(e) {
+    tb.querySelector('.bubble').classList.remove('typing');
+    tb.querySelector('.bt').textContent = '⚠ 錯誤：' + e.message;
+  }
+
+  isLoading = false;
+  document.getElementById('send-btn').disabled = false;
+  ui.focus();
+  scrollBot();
+}
+
+// ── Add bubble ──
+function addBubble(role, text, typing, extra) {
+  const msgs = document.getElementById('messages');
+  const row = document.createElement('div');
+  row.className = `msg-row ${role}`;
+
+  if (role === 'assistant') {
+    const av = document.createElement('div');
+    av.className = 'msg-av';
+    if (avatarB64) { const i = document.createElement('img'); i.src = avatarB64; av.appendChild(i); }
+    else av.textContent = '🎭';
+    row.appendChild(av);
+  }
+
+  const col = document.createElement('div');
+  col.className = 'msg-col';
+
+  if (role === 'assistant') {
+    const nm = document.createElement('div');
+    nm.className = 'msg-name';
+    nm.textContent = charName || '角色';
+    col.appendChild(nm);
+  }
+
+  const bbl = document.createElement('div');
+  bbl.className = 'bubble' + (typing ? ' typing' : '');
+
+  if (extra) {
+    if (extra.type === 'image') {
+      const img = document.createElement('img');
+      img.src = extra.src; img.className = 'msg-img';
+      bbl.appendChild(img);
+    } else if (extra.type === 'pdf') {
+      const bd = document.createElement('div');
+      bd.className = 'pdf-badge';
+      bd.innerHTML = `📄 ${extra.name}`;
+      bbl.appendChild(bd);
+    }
+  }
+
+  const sp = document.createElement('span');
+  sp.className = 'bt';
+  sp.textContent = text;
+  bbl.appendChild(sp);
+  col.appendChild(bbl);
+  row.appendChild(col);
+  msgs.appendChild(row);
+  scrollBot();
+  return row;
+}
+
+function scrollBot() {
+  const m = document.getElementById('messages');
+  m.scrollTop = m.scrollHeight;
+}
+
+// ── Settings panel ──
+document.getElementById('settings-btn').addEventListener('click', () => {
+  document.getElementById('set-name').value = charName;
+  document.getElementById('set-inst').value = instText;
+  setAv('set-av-img','set-av-ph', avatarB64);
+  renderAllDocs();
+  document.getElementById('settings-panel').classList.add('open');
+});
+
+document.getElementById('settings-panel').addEventListener('click', e => {
+  if (e.target === document.getElementById('settings-panel'))
+    document.getElementById('settings-panel').classList.remove('open');
+});
+
+bindAv('set-av-btn','set-av-upload-btn','set-av-file','set-av-img','set-av-ph');
+
+document.getElementById('set-save-btn').addEventListener('click', () => {
+  charName = document.getElementById('set-name').value.trim() || '角色';
+  instText = document.getElementById('set-inst').value.trim();
+  document.getElementById('hdr-name').textContent = charName;
+  setAv('hdr-av-img','hdr-av-ph', avatarB64);
+  save();
+  document.getElementById('settings-panel').classList.remove('open');
+});
+
+// ── Export ──
+document.getElementById('export-btn').addEventListener('click', () => {
+  const data = JSON.stringify({ charName, docs, instText, history }, null, 2);
+  const blob = new Blob([data], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `rp-chat-${Date.now()}.json`;
+  a.click();
+});
+
+// ── Import ──
+document.getElementById('import-trigger-btn').addEventListener('click', () => {
+  document.getElementById('import-file').click();
+});
+document.getElementById('import-file').addEventListener('change', e => {
+  const f = e.target.files[0]; if (!f) return;
+  e.target.value = '';
+  const r = new FileReader();
+  r.onload = () => {
+    try {
+      const s = JSON.parse(r.result);
+      if (!Array.isArray(s.history)) throw new Error('格式錯誤');
+      if (!confirm(`匯入後將取代現有對話紀錄（${s.history.length} 則訊息），確定嗎？`)) return;
+      if (s.charName) charName = s.charName;
+      if (s.docs) docs = s.docs;
+      if (s.instText) instText = s.instText;
+      history = s.history;
+      document.getElementById('hdr-name').textContent = charName;
+      document.getElementById('set-name').value = charName;
+      document.getElementById('set-inst').value = instText;
+      renderAllDocs();
+      save();
+      document.getElementById('messages').innerHTML = '';
+      renderHistory();
+      document.getElementById('settings-panel').classList.remove('open');
+    } catch(err) {
+      alert('匯入失敗：' + err.message);
+    }
+  };
+  r.readAsText(f);
+});
+
+// ── Clear ──
+document.getElementById('clear-btn').addEventListener('click', () => {
+  if (!confirm('確定要清除所有對話紀錄嗎？')) return;
+  history = [];
+  document.getElementById('messages').innerHTML = '';
+  save();
+  document.getElementById('settings-panel').classList.remove('open');
+});
+
+// ── Util ──
+function toB64(file) {
+  return new Promise((res,rej) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result);
+    r.onerror = () => rej(new Error('read failed'));
+    r.readAsDataURL(file);
+  });
+}
+</script>
+</body>
+</html>
