@@ -290,6 +290,21 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
   border: 1px solid var(--border); align-self: center;
 }
 
+/* Action buttons */
+.bubble-actions {
+  display: none; gap: 5px; margin-top: 4px;
+}
+.bubble-actions.show { display: flex; }
+.msg-row.user .bubble-actions { justify-content: flex-end; }
+.msg-row.assistant .bubble-actions { justify-content: flex-start; padding-left: 2px; }
+.action-btn {
+  background: none; border: 1px solid var(--border);
+  color: var(--text-dim); font-size: 11px; padding: 3px 9px;
+  border-radius: 6px; cursor: pointer; transition: all .15s;
+  white-space: nowrap;
+}
+.action-btn:hover { border-color: var(--accent); color: var(--accent); }
+
 /* Input */
 .input-area { padding: 9px 13px 15px; background: var(--surface); border-top: 1px solid var(--border); flex-shrink: 0; }
 #file-preview { display: none; align-items: center; gap: 8px; margin-bottom: 7px; background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 7px 10px; }
@@ -708,7 +723,8 @@ function renderMessages() {
   const el = document.getElementById('messages');
   el.innerHTML='';
   if (!conv) return;
-  for (const msg of conv.history) {
+  for (let i=0; i<conv.history.length; i++) {
+    const msg=conv.history[i];
     if (msg._notice) { addNotice(msg._notice); continue; }
     if (msg.role==='user') {
       const text = typeof msg.content==='string' ? msg.content
@@ -720,11 +736,11 @@ function renderMessages() {
         if (ib) extra={type:'image',src:`data:${ib.source.media_type};base64,${ib.source.data}`};
         else if (db) extra={type:'pdf',name:'PDF 文件'};
       }
-      addBubble('user',text,false,extra,null);
+      addBubble('user',text,false,extra,null,i);
     } else {
       const textB=Array.isArray(msg.content)?msg.content.find(b=>b.type==='text')?.text||'':typeof msg.content==='string'?msg.content:'';
       const thinkB=Array.isArray(msg.content)?msg.content.find(b=>b.type==='thinking')?.thinking||null:null;
-      addBubble('assistant',textB,false,null,thinkB);
+      addBubble('assistant',textB,false,null,thinkB,i);
     }
   }
   scrollBot();
@@ -821,12 +837,20 @@ async function send() {
   } else { content=text; }
 
   conv.history.push({role:'user',content});
-  addBubble('user',text,false,extra,null);
-  const tb=addBubble('assistant','正在輸入…',true,null,null);
+  const userIdx=conv.history.length-1;
+  addBubble('user',text,false,extra,null,userIdx);
+  const tb=addBubble('assistant','正在輸入…',true,null,null,-1);
 
   try {
     const sys=buildSystem();
-    const apiMessages=conv.history.filter(m=>!m._notice);
+    const apiMessages=conv.history.filter(m=>!m._notice).map(m=>{
+      // 過濾掉 thinking block，避免缺少 signature 報錯
+      if (Array.isArray(m.content)) {
+        const filtered = m.content.filter(b=>b.type!=='thinking');
+        return { ...m, content: filtered.length===1&&filtered[0].type==='text' ? filtered[0].text : filtered };
+      }
+      return m;
+    });
     const body={model:document.getElementById('chat-model').value,max_tokens:thinkingEnabled?16000:2048,messages:apiMessages};
     if (sys) body.system=sys;
     if (thinkingEnabled) body.thinking={type:'enabled',budget_tokens:10000};
@@ -850,6 +874,13 @@ async function send() {
       tb.querySelector('.msg-col').insertBefore(thinkEl,tb.querySelector('.bubble'));
     }
     conv.history.push({role:'assistant',content:thinkingText?[{type:'thinking',thinking:thinkingText},{type:'text',text:reply}]:reply});
+    // 加入重新生成按鈕
+    const newIdx=conv.history.length-1;
+    const actions=document.createElement('div'); actions.className='bubble-actions show';
+    const regenBtn=document.createElement('button'); regenBtn.className='action-btn'; regenBtn.textContent='↺ 重新生成';
+    regenBtn.addEventListener('click', ()=>regenerateFrom(newIdx));
+    actions.appendChild(regenBtn);
+    tb.querySelector('.msg-col').appendChild(actions);
     save(); renderConvList();
     await maybeCompress();
   } catch(e) {
@@ -864,7 +895,7 @@ async function send() {
 }
 
 // ── Bubble ──
-function addBubble(role,text,typing,extra,thinkingText) {
+function addBubble(role,text,typing,extra,thinkingText,historyIdx) {
   const msgs=document.getElementById('messages');
   const row=document.createElement('div');
   row.className=`msg-row ${role}`;
@@ -886,8 +917,112 @@ function addBubble(role,text,typing,extra,thinkingText) {
     else if (extra.type==='pdf') { const bd=document.createElement('div'); bd.className='pdf-badge'; bd.innerHTML=`📄 ${extra.name}`; bbl.appendChild(bd); }
   }
   const sp=document.createElement('span'); sp.className='bt'; sp.textContent=text;
-  bbl.appendChild(sp); col.appendChild(bbl); row.appendChild(col); msgs.appendChild(row);
+  bbl.appendChild(sp); col.appendChild(bbl);
+
+  // Action buttons
+  if (!typing && historyIdx >= 0) {
+    const actions=document.createElement('div');
+    actions.className='bubble-actions';
+    if (role==='user') {
+      const editBtn=document.createElement('button');
+      editBtn.className='action-btn'; editBtn.textContent='✏ 編輯';
+      editBtn.addEventListener('click', e=>{ e.stopPropagation(); editMessage(historyIdx); });
+      actions.appendChild(editBtn);
+      // Toggle on bubble click
+      bbl.style.cursor='pointer';
+      bbl.addEventListener('click', ()=>{ actions.classList.toggle('show'); });
+    } else {
+      const regenBtn=document.createElement('button');
+      regenBtn.className='action-btn'; regenBtn.textContent='↺ 重新生成';
+      regenBtn.addEventListener('click', e=>{ e.stopPropagation(); regenerateFrom(historyIdx); });
+      actions.appendChild(regenBtn);
+      actions.classList.add('show');
+    }
+    col.appendChild(actions);
+  }
+
+  row.appendChild(col); msgs.appendChild(row);
   scrollBot(); return row;
+}
+
+// ── Edit message ──
+function editMessage(historyIdx) {
+  const conv=currentConv(); if (!conv||isLoading) return;
+  const msg=conv.history[historyIdx];
+  const text=typeof msg.content==='string'?msg.content
+    :Array.isArray(msg.content)?msg.content.filter(b=>b.type==='text').map(b=>b.text).join(''):'';
+  ui.value=text;
+  ui.style.height='auto';
+  ui.style.height=Math.min(ui.scrollHeight,130)+'px';
+  conv.history=conv.history.slice(0,historyIdx);
+  save(); renderConvList();
+  document.getElementById('messages').innerHTML='';
+  renderMessages();
+  ui.focus();
+}
+
+// ── Regenerate ──
+async function regenerateFrom(historyIdx) {
+  const conv=currentConv(); if (!conv||isLoading) return;
+  // Remove this assistant message and everything after
+  conv.history=conv.history.slice(0,historyIdx);
+  save(); renderConvList();
+  document.getElementById('messages').innerHTML='';
+  renderMessages();
+
+  isLoading=true;
+  document.getElementById('send-btn').disabled=true;
+  const tb=addBubble('assistant','正在輸入…',true,null,null,-1);
+
+  try {
+    const sys=buildSystem();
+    const apiMessages=conv.history.filter(m=>!m._notice).map(m=>{
+      if (Array.isArray(m.content)) {
+        const filtered=m.content.filter(b=>b.type!=='thinking');
+        return {...m,content:filtered.length===1&&filtered[0].type==='text'?filtered[0].text:filtered};
+      }
+      return m;
+    });
+    const body={model:document.getElementById('chat-model').value,max_tokens:thinkingEnabled?16000:2048,messages:apiMessages};
+    if (sys) body.system=sys;
+    if (thinkingEnabled) body.thinking={type:'enabled',budget_tokens:10000};
+    const res=await fetch('https://api.anthropic.com/v1/messages',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+      body:JSON.stringify(body)
+    });
+    if (!res.ok) { const err=await res.json().catch(()=>({})); throw new Error(err?.error?.message||`HTTP ${res.status}`); }
+    const data=await res.json();
+    const thinkBlock=data.content?.find(b=>b.type==='thinking');
+    const textBlock=data.content?.find(b=>b.type==='text');
+    const thinkingText=thinkBlock?.thinking||null;
+    const reply=textBlock?.text||'（沒有回應）';
+    tb.querySelector('.bubble').classList.remove('typing');
+    tb.querySelector('.bt').textContent=reply;
+    if (thinkingText) {
+      const thinkEl=document.createElement('details'); thinkEl.className='thinking-block';
+      thinkEl.innerHTML=`<summary class="thinking-summary">思考過程</summary><div class="thinking-content">${escHtml(thinkingText)}</div>`;
+      tb.querySelector('.msg-col').insertBefore(thinkEl,tb.querySelector('.bubble'));
+    }
+    const assistantContent=thinkingText?[{type:'thinking',thinking:thinkingText},{type:'text',text:reply}]:reply;
+    conv.history.push({role:'assistant',content:assistantContent});
+    // Add action buttons to the new bubble
+    const newIdx=conv.history.length-1;
+    const actions=document.createElement('div'); actions.className='bubble-actions show';
+    const regenBtn=document.createElement('button'); regenBtn.className='action-btn'; regenBtn.textContent='↺ 重新生成';
+    regenBtn.addEventListener('click', ()=>regenerateFrom(newIdx));
+    actions.appendChild(regenBtn);
+    tb.querySelector('.msg-col').appendChild(actions);
+    save(); renderConvList();
+    await maybeCompress();
+  } catch(e) {
+    tb.querySelector('.bubble').classList.remove('typing');
+    tb.querySelector('.bt').textContent='⚠ 錯誤：'+e.message;
+  }
+
+  isLoading=false;
+  document.getElementById('send-btn').disabled=false;
+  ui.focus(); scrollBot();
 }
 
 function addNotice(text) {
