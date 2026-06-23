@@ -678,15 +678,15 @@ document.getElementById('set-add-doc-btn').addEventListener('click', ()=>addDoc(
 document.getElementById('start-btn').addEventListener('click', () => {
   const key = document.getElementById('api-key-input').value.trim();
   const dk = document.getElementById('ds-key-input').value.trim();
-  if (!key.startsWith('sk-ant-') && !dk.startsWith('sk-')) {
-    document.getElementById('setup-err').style.display='block'; return;
-  }
-  if (key && !key.startsWith('sk-ant-')) {
+  // 至少要有一個有效的 key
+  const claudeOk = key.startsWith('sk-ant-');
+  const dsOk = dk.startsWith('sk-');
+  if (!claudeOk && !dsOk) {
     document.getElementById('setup-err').style.display='block'; return;
   }
   document.getElementById('setup-err').style.display='none';
-  apiKey=key;
-  dsKey=dk;
+  if (claudeOk) apiKey=key;
+  if (dsOk) dsKey=dk;
   charName=document.getElementById('char-name-input').value.trim()||'角色';
   instText=document.getElementById('inst-input').value.trim();
   document.getElementById('chat-model').value=document.getElementById('setup-model').value;
@@ -1345,6 +1345,8 @@ document.getElementById('import-claude-file-sb').addEventListener('change', e =>
   const f = e.target.files[0]; if (!f) return; e.target.value='';
   handleClaudeImportFile(f);
 });
+// ── 網頁格式匯入 ──
+function doImport(f) {
   const r=new FileReader();
   r.onload=()=>{
     try {
