@@ -343,6 +343,34 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
 .io-row .btn-sm { flex: 1; text-align: center; }
 .btn-green { flex: 1; text-align: center; background: none; border: 1px solid var(--green); color: var(--green); font-size: 12px; padding: 5px 11px; border-radius: 7px; cursor: pointer; transition: background .15s; }
 .btn-green:hover { background: rgba(134,239,172,.1); }
+
+/* 官端對話選擇 Modal */
+#claude-import-modal {
+  display: none; position: fixed; inset: 0;
+  background: rgba(0,0,0,.8); z-index: 200;
+  align-items: center; justify-content: center; padding: 20px;
+}
+#claude-import-modal.open { display: flex; }
+.modal-sheet {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 16px; width: 100%; max-width: 480px;
+  max-height: 80dvh; overflow-y: auto; padding: 20px;
+}
+.modal-title { font-size: 15px; font-weight: 700; margin-bottom: 4px; }
+.modal-sub { font-size: 12px; color: var(--text-dim); margin-bottom: 14px; }
+.conv-select-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.conv-select-item {
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: 9px; padding: 10px 12px; cursor: pointer;
+  transition: border-color .15s;
+}
+.conv-select-item:hover { border-color: var(--accent); }
+.conv-select-item.selected { border-color: var(--accent); background: var(--surface2); }
+.conv-select-name { font-size: 13px; color: var(--text); }
+.conv-select-count { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+.modal-btns { display: flex; gap: 8px; }
+.modal-cancel { flex: 1; padding: 10px; background: none; border: 1px solid var(--border); color: var(--text-dim); border-radius: 9px; font-size: 13px; cursor: pointer; }
+.modal-confirm { flex: 1; padding: 10px; background: linear-gradient(135deg, var(--accent-dim), #5e008f); color: #fff; border: none; border-radius: 9px; font-size: 13px; font-weight: 600; cursor: pointer; }
 </style>
 </head>
 <body>
@@ -422,8 +450,10 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
     <div class="sidebar-footer">
       <button class="sidebar-footer-btn" id="sb-settings-btn">⚙ 角色與設定</button>
       <button class="sidebar-footer-btn" id="sb-export-btn">📤 匯出目前對話</button>
-      <button class="sidebar-footer-btn" id="sb-import-btn">📥 匯入為新對話</button>
+      <button class="sidebar-footer-btn" id="sb-import-btn">📥 匯入網頁對話</button>
+      <button class="sidebar-footer-btn" id="sb-import-claude-btn">📥 匯入官端對話</button>
       <input type="file" id="import-file" accept=".json" style="display:none">
+      <input type="file" id="import-claude-file-sb" accept=".json" style="display:none">
     </div>
   </div>
 
@@ -502,10 +532,25 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
     <div class="sh-sec">目前對話</div>
     <div class="io-row">
       <button class="btn-green" id="export-btn">📤 匯出 JSON</button>
-      <button class="btn-sm" id="import-trigger-btn">📥 匯入為新對話</button>
+      <button class="btn-sm" id="import-trigger-btn">📥 匯入網頁對話</button>
     </div>
+    <button class="btn-sm" id="import-claude-trigger-btn" style="width:100%;margin-top:8px;text-align:center">📥 匯入官端對話（claude.ai 匯出）</button>
     <input type="file" id="import-file2" accept=".json" style="display:none">
+    <input type="file" id="import-claude-file" accept=".json" style="display:none">
     <button class="btn-danger" id="clear-btn">清除目前對話紀錄</button>
+  </div>
+</div>
+
+<!-- 官端對話選擇 Modal -->
+<div id="claude-import-modal">
+  <div class="modal-sheet">
+    <div class="modal-title">選擇要匯入的對話</div>
+    <div class="modal-sub">將保留最後 40 則訊息匯入為新對話窗口</div>
+    <div class="conv-select-list" id="conv-select-list"></div>
+    <div class="modal-btns">
+      <button class="modal-cancel" id="modal-cancel">取消</button>
+      <button class="modal-confirm" id="modal-confirm">匯入</button>
+    </div>
   </div>
 </div>
 
@@ -1182,8 +1227,124 @@ function exportConv() {
 }
 document.getElementById('export-btn').addEventListener('click', exportConv);
 
-// ── Import ──
-function doImport(f) {
+// ── 官端格式匯入 ──
+let claudeImportData = null; // 暫存解析後的官端對話列表
+let selectedClaudeConvIdx = null;
+
+function openClaudeImportFile(fileInputId) {
+  document.getElementById(fileInputId).click();
+}
+
+function handleClaudeImportFile(file) {
+  if (!file) return;
+  const r = new FileReader();
+  r.onload = () => {
+    try {
+      const raw = JSON.parse(r.result);
+      // 官端格式：通常是陣列，每個元素是一個對話
+      // 或者是 { conversations: [...] } 的包裝格式
+      let convList = [];
+      if (Array.isArray(raw)) {
+        convList = raw;
+      } else if (raw.conversations && Array.isArray(raw.conversations)) {
+        convList = raw.conversations;
+      } else {
+        throw new Error('無法識別格式');
+      }
+
+      // 過濾出有訊息的對話
+      claudeImportData = convList.filter(c => {
+        const msgs = c.chat_messages || c.messages || [];
+        return msgs.length > 0;
+      });
+
+      if (!claudeImportData.length) throw new Error('找不到對話內容');
+
+      // 渲染選擇列表
+      const list = document.getElementById('conv-select-list');
+      list.innerHTML = '';
+      selectedClaudeConvIdx = 0;
+
+      claudeImportData.forEach((conv, i) => {
+        const msgs = conv.chat_messages || conv.messages || [];
+        const name = conv.name || conv.title || `對話 ${i+1}`;
+        const item = document.createElement('div');
+        item.className = 'conv-select-item' + (i===0?' selected':'');
+        item.innerHTML = `<div class="conv-select-name">${escHtml(name)}</div>
+          <div class="conv-select-count">${msgs.length} 則訊息</div>`;
+        item.addEventListener('click', () => {
+          document.querySelectorAll('.conv-select-item').forEach(el=>el.classList.remove('selected'));
+          item.classList.add('selected');
+          selectedClaudeConvIdx = i;
+        });
+        list.appendChild(item);
+      });
+
+      document.getElementById('claude-import-modal').classList.add('open');
+      document.getElementById('settings-panel').classList.remove('open');
+      document.getElementById('sidebar').classList.remove('open');
+      document.getElementById('sidebar-overlay').classList.remove('open');
+
+    } catch(err) {
+      alert('讀取失敗：' + err.message + '\n請確認是 claude.ai 匯出的 JSON 格式');
+    }
+  };
+  r.readAsText(file);
+}
+
+function doClaudeImport() {
+  if (selectedClaudeConvIdx === null || !claudeImportData) return;
+  const conv = claudeImportData[selectedClaudeConvIdx];
+  const rawMsgs = conv.chat_messages || conv.messages || [];
+  const name = conv.name || conv.title || '官端匯入對話';
+
+  // 轉換格式：官端的 sender 是 'human'/'assistant'，content 可能是字串或陣列
+  const converted = rawMsgs.map(m => {
+    const role = (m.sender || m.role) === 'human' ? 'user' : 'assistant';
+    let content = '';
+    if (typeof m.text === 'string') content = m.text;
+    else if (typeof m.content === 'string') content = m.content;
+    else if (Array.isArray(m.content)) {
+      content = m.content.filter(b=>b.type==='text').map(b=>b.text).join('');
+    }
+    return { role, content };
+  }).filter(m => m.content.trim());
+
+  // 只保留最後 40 則
+  const kept = converted.slice(-40);
+
+  const newConv = { id: uid(), name, history: kept };
+  conversations.push(newConv);
+  currentConvId = newConv.id;
+  save(); renderConvList(); renderMessages();
+  document.getElementById('claude-import-modal').classList.remove('open');
+  claudeImportData = null;
+  selectedClaudeConvIdx = null;
+}
+
+document.getElementById('modal-cancel').addEventListener('click', () => {
+  document.getElementById('claude-import-modal').classList.remove('open');
+  claudeImportData = null;
+});
+document.getElementById('modal-confirm').addEventListener('click', doClaudeImport);
+
+// 設定面板的官端匯入按鈕
+document.getElementById('import-claude-trigger-btn').addEventListener('click', () => {
+  document.getElementById('import-claude-file').click();
+});
+document.getElementById('import-claude-file').addEventListener('change', e => {
+  const f = e.target.files[0]; if (!f) return; e.target.value='';
+  handleClaudeImportFile(f);
+});
+
+// 側邊欄的官端匯入按鈕
+document.getElementById('sb-import-claude-btn').addEventListener('click', () => {
+  document.getElementById('import-claude-file-sb').click();
+});
+document.getElementById('import-claude-file-sb').addEventListener('change', e => {
+  const f = e.target.files[0]; if (!f) return; e.target.value='';
+  handleClaudeImportFile(f);
+});
   const r=new FileReader();
   r.onload=()=>{
     try {
