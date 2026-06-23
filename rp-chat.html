@@ -355,7 +355,10 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
   </div>
   <div class="card">
     <div class="card-title">API 金鑰</div>
+    <label class="lbl">Anthropic（Claude）</label>
     <input class="finput" type="password" id="api-key-input" placeholder="sk-ant-api03-…" autocomplete="off">
+    <label class="lbl">DeepSeek（選填）</label>
+    <input class="finput" type="password" id="ds-key-input" placeholder="sk-…" autocomplete="off">
   </div>
   <div class="card">
     <div class="card-title">角色設定</div>
@@ -387,10 +390,16 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
     <div style="display:flex;align-items:center;justify-content:space-between">
       <label style="font-size:13px;color:var(--text-dim)">使用模型</label>
       <select class="fselect" id="setup-model">
-        <option value="claude-haiku-4-5-20251001">Haiku 4.5（最省）</option>
-        <option value="claude-sonnet-4-6" selected>Sonnet 4.6（推薦）</option>
-        <option value="claude-opus-4-5">Opus 4.5（省 token）</option>
-        <option value="claude-opus-4-6">Opus 4.6（最強）</option>
+        <optgroup label="── Claude ──">
+          <option value="claude-haiku-4-5-20251001">Haiku 4.5（最省）</option>
+          <option value="claude-sonnet-4-6" selected>Sonnet 4.6（推薦）</option>
+          <option value="claude-opus-4-5">Opus 4.5（省 token）</option>
+          <option value="claude-opus-4-6">Opus 4.6（最強）</option>
+        </optgroup>
+        <optgroup label="── DeepSeek ──">
+          <option value="deepseek-v4-flash">V4 Flash（超省）</option>
+          <option value="deepseek-v4-pro">V4 Pro（旗艦）</option>
+        </optgroup>
       </select>
     </div>
   </div>
@@ -426,10 +435,16 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
     <div class="hdr-btns">
       <button class="think-toggle" id="think-toggle">💭 思考</button>
       <select class="hdr-select" id="chat-model">
-        <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
-        <option value="claude-sonnet-4-6" selected>Sonnet 4.6</option>
-        <option value="claude-opus-4-5">Opus 4.5</option>
-        <option value="claude-opus-4-6">Opus 4.6</option>
+        <optgroup label="Claude">
+          <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
+          <option value="claude-sonnet-4-6" selected>Sonnet 4.6</option>
+          <option value="claude-opus-4-5">Opus 4.5</option>
+          <option value="claude-opus-4-6">Opus 4.6</option>
+        </optgroup>
+        <optgroup label="DeepSeek">
+          <option value="deepseek-v4-flash">DS V4 Flash</option>
+          <option value="deepseek-v4-pro">DS V4 Pro</option>
+        </optgroup>
       </select>
     </div>
   </div>
@@ -459,6 +474,11 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
   <div class="settings-sheet">
     <div class="sh-handle"></div>
     <div class="sh-title">角色與設定</div>
+    <div class="sh-sec">API 金鑰</div>
+    <label class="lbl">Anthropic（Claude）</label>
+    <input class="finput" type="password" id="set-claude-key" placeholder="sk-ant-api03-…" autocomplete="off">
+    <label class="lbl">DeepSeek（選填）</label>
+    <input class="finput" type="password" id="set-ds-key" placeholder="sk-…" autocomplete="off">
     <div class="sh-sec">角色頭像</div>
     <div class="av-row" style="margin-bottom:8px">
       <div class="av-circle" id="set-av-btn"><span id="set-av-ph">🎭</span><img id="set-av-img" style="display:none"></div>
@@ -492,7 +512,7 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
 <script>
 // ── State ──
 const SK = 'rp_v5';
-let apiKey = '', charName = '', avatarB64 = '', docs = [], instText = '';
+let apiKey = '', dsKey = '', charName = '', avatarB64 = '', docs = [], instText = '';
 let thinkingEnabled = false;
 let conversations = []; // [{ id, name, history }]
 let currentConvId = null;
@@ -504,12 +524,16 @@ const KEEP_RECENT = 10;
 // ── Helpers ──
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2); }
 function currentConv() { return conversations.find(c => c.id === currentConvId); }
+function isDeepSeek(model) { return model.startsWith('deepseek-'); }
+function getKey(model) { return isDeepSeek(model) ? dsKey : apiKey; }
+function getBaseUrl(model) { return isDeepSeek(model) ? 'https://api.deepseek.com/v1/messages' : 'https://api.anthropic.com/v1/messages'; }
 
 // ── Load ──
 try {
   const s = JSON.parse(localStorage.getItem(SK) || 'null');
   if (s && s.apiKey) {
     apiKey = s.apiKey || '';
+    dsKey = s.dsKey || '';
     charName = s.charName || '';
     avatarB64 = s.avatarB64 || '';
     docs = s.docs || [];
@@ -533,7 +557,7 @@ try {
 function save() {
   try {
     localStorage.setItem(SK, JSON.stringify({
-      apiKey, charName, avatarB64, docs, instText, thinkingEnabled,
+      apiKey, dsKey, charName, avatarB64, docs, instText, thinkingEnabled,
       conversations, currentConvId,
       model: document.getElementById('chat-model').value
     }));
@@ -608,9 +632,16 @@ document.getElementById('set-add-doc-btn').addEventListener('click', ()=>addDoc(
 // ── Start ──
 document.getElementById('start-btn').addEventListener('click', () => {
   const key = document.getElementById('api-key-input').value.trim();
-  if (!key.startsWith('sk-ant-')) { document.getElementById('setup-err').style.display='block'; return; }
+  const dk = document.getElementById('ds-key-input').value.trim();
+  if (!key.startsWith('sk-ant-') && !dk.startsWith('sk-')) {
+    document.getElementById('setup-err').style.display='block'; return;
+  }
+  if (key && !key.startsWith('sk-ant-')) {
+    document.getElementById('setup-err').style.display='block'; return;
+  }
   document.getElementById('setup-err').style.display='none';
   apiKey=key;
+  dsKey=dk;
   charName=document.getElementById('char-name-input').value.trim()||'角色';
   instText=document.getElementById('inst-input').value.trim();
   document.getElementById('chat-model').value=document.getElementById('setup-model').value;
@@ -807,7 +838,13 @@ document.getElementById('fp-rm').addEventListener('click', ()=>{ pendingFile=nul
 // ── Input ──
 const ui = document.getElementById('user-input');
 ui.addEventListener('input', ()=>{ ui.style.height='auto'; ui.style.height=Math.min(ui.scrollHeight,130)+'px'; });
-ui.addEventListener('keydown', e=>{ if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();} });
+// 手機上 Enter 換行，電腦上 Shift+Enter 換行，Ctrl+Enter 送出
+ui.addEventListener('keydown', e=>{
+  if(e.key==='Enter'){
+    if(e.ctrlKey||e.metaKey){ e.preventDefault(); send(); return; }
+    // 讓 Enter 正常換行，不攔截
+  }
+});
 document.getElementById('send-btn').addEventListener('click', send);
 
 function buildSystem() {
@@ -842,29 +879,70 @@ async function send() {
   const tb=addBubble('assistant','正在輸入…',true,null,null,-1);
 
   try {
+    const model=document.getElementById('chat-model').value;
     const sys=buildSystem();
     const apiMessages=conv.history.filter(m=>!m._notice).map(m=>{
-      // 過濾掉 thinking block，避免缺少 signature 報錯
       if (Array.isArray(m.content)) {
         const filtered = m.content.filter(b=>b.type!=='thinking');
         return { ...m, content: filtered.length===1&&filtered[0].type==='text' ? filtered[0].text : filtered };
       }
       return m;
     });
-    const body={model:document.getElementById('chat-model').value,max_tokens:thinkingEnabled?16000:2048,messages:apiMessages};
-    if (sys) body.system=sys;
-    if (thinkingEnabled) body.thinking={type:'enabled',budget_tokens:10000};
-    const res=await fetch('https://api.anthropic.com/v1/messages',{
-      method:'POST',
-      headers:{'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
-      body:JSON.stringify(body)
-    });
+
+    const useDS = isDeepSeek(model);
+    const key = getKey(model);
+    if (!key) throw new Error(useDS ? '請先填入 DeepSeek API 金鑰' : '請先填入 Anthropic API 金鑰');
+
+    let body, headers, url;
+
+    if (useDS) {
+      // DeepSeek 用 OpenAI 相容格式
+      const dsMessages = apiMessages.map(m=>({
+        role: m.role,
+        content: typeof m.content==='string' ? m.content
+          : Array.isArray(m.content) ? m.content.filter(b=>b.type==='text').map(b=>b.text).join('') : ''
+      }));
+      body = { model, max_tokens: 2048, messages: dsMessages };
+      if (sys) body.system = sys;
+      if (thinkingEnabled) body.thinking = { type:'enabled', budget_tokens:10000 };
+      headers = { 'Content-Type':'application/json', 'Authorization':`Bearer ${key}` };
+      url = 'https://api.deepseek.com/chat/completions';
+    } else {
+      // Claude 用 Anthropic 格式 + Prompt Caching
+      const cachedMessages = apiMessages.map((m, i) => {
+        if (i < apiMessages.length - 2) {
+          const content = typeof m.content === 'string'
+            ? [{ type: 'text', text: m.content, cache_control: { type: 'ephemeral' } }]
+            : Array.isArray(m.content)
+              ? [...m.content.slice(0,-1), { ...m.content[m.content.length-1], cache_control: { type: 'ephemeral' } }]
+              : m.content;
+          return { ...m, content };
+        }
+        return m;
+      });
+      body = { model, max_tokens: thinkingEnabled?16000:2048, messages: cachedMessages };
+      if (sys) body.system = [{ type:'text', text:sys, cache_control:{ type:'ephemeral' } }];
+      if (thinkingEnabled) body.thinking = { type:'enabled', budget_tokens:10000 };
+      headers = { 'Content-Type':'application/json', 'x-api-key':key, 'anthropic-version':'2023-06-01', 'anthropic-dangerous-direct-browser-access':'true' };
+      url = 'https://api.anthropic.com/v1/messages';
+    }
+
+    const res=await fetch(url,{ method:'POST', headers, body:JSON.stringify(body) });
     if (!res.ok) { const err=await res.json().catch(()=>({})); throw new Error(err?.error?.message||`HTTP ${res.status}`); }
     const data=await res.json();
-    const thinkBlock=data.content?.find(b=>b.type==='thinking');
-    const textBlock=data.content?.find(b=>b.type==='text');
-    const thinkingText=thinkBlock?.thinking||null;
-    const reply=textBlock?.text||'（沒有回應）';
+
+    let reply, thinkingText=null;
+    if (useDS) {
+      reply = data.choices?.[0]?.message?.content || '（沒有回應）';
+      // DeepSeek 思考內容在 reasoning_content
+      thinkingText = data.choices?.[0]?.message?.reasoning_content || null;
+    } else {
+      const thinkBlock=data.content?.find(b=>b.type==='thinking');
+      const textBlock=data.content?.find(b=>b.type==='text');
+      thinkingText=thinkBlock?.thinking||null;
+      reply=textBlock?.text||'（沒有回應）';
+    }
+
     tb.querySelector('.bubble').classList.remove('typing');
     tb.querySelector('.bt').textContent=reply;
     if (thinkingText) {
@@ -874,7 +952,6 @@ async function send() {
       tb.querySelector('.msg-col').insertBefore(thinkEl,tb.querySelector('.bubble'));
     }
     conv.history.push({role:'assistant',content:thinkingText?[{type:'thinking',thinking:thinkingText},{type:'text',text:reply}]:reply});
-    // 加入重新生成按鈕
     const newIdx=conv.history.length-1;
     const actions=document.createElement('div'); actions.className='bubble-actions show';
     const regenBtn=document.createElement('button'); regenBtn.className='action-btn'; regenBtn.textContent='↺ 重新生成';
@@ -980,6 +1057,7 @@ async function regenerateFrom(historyIdx) {
   const tb=addBubble('assistant','正在輸入…',true,null,null,-1);
 
   try {
+    const model=document.getElementById('chat-model').value;
     const sys=buildSystem();
     const apiMessages=conv.history.filter(m=>!m._notice).map(m=>{
       if (Array.isArray(m.content)) {
@@ -989,35 +1067,54 @@ async function regenerateFrom(historyIdx) {
       return m;
     });
 
-    // 對歷史訊息加快取（除了最後兩則）
-    const cachedMessages = apiMessages.map((m, i) => {
-      if (i < apiMessages.length - 2) {
-        const content = typeof m.content === 'string'
-          ? [{ type: 'text', text: m.content, cache_control: { type: 'ephemeral' } }]
-          : Array.isArray(m.content)
-            ? [...m.content.slice(0,-1), { ...m.content[m.content.length-1], cache_control: { type: 'ephemeral' } }]
-            : m.content;
-        return { ...m, content };
-      }
-      return m;
-    });
+    const useDS=isDeepSeek(model);
+    const key=getKey(model);
+    if (!key) throw new Error(useDS?'請先填入 DeepSeek API 金鑰':'請先填入 Anthropic API 金鑰');
 
-    const body={model:document.getElementById('chat-model').value,max_tokens:thinkingEnabled?16000:2048,messages:cachedMessages};
+    let body, headers, url;
+    if (useDS) {
+      const dsMessages=apiMessages.map(m=>({
+        role:m.role,
+        content:typeof m.content==='string'?m.content:Array.isArray(m.content)?m.content.filter(b=>b.type==='text').map(b=>b.text).join(''):''
+      }));
+      body={model,max_tokens:2048,messages:dsMessages};
+      if (sys) body.system=sys;
+      headers={'Content-Type':'application/json','Authorization':`Bearer ${key}`};
+      url='https://api.deepseek.com/chat/completions';
+    } else {
+      const cachedMessages=apiMessages.map((m,i)=>{
+        if (i<apiMessages.length-2) {
+          const content=typeof m.content==='string'
+            ?[{type:'text',text:m.content,cache_control:{type:'ephemeral'}}]
+            :Array.isArray(m.content)
+              ?[...m.content.slice(0,-1),{...m.content[m.content.length-1],cache_control:{type:'ephemeral'}}]
+              :m.content;
+          return {...m,content};
+        }
+        return m;
+      });
+      body={model,max_tokens:thinkingEnabled?16000:2048,messages:cachedMessages};
+      if (sys) body.system=[{type:'text',text:sys,cache_control:{type:'ephemeral'}}];
+      if (thinkingEnabled) body.thinking={type:'enabled',budget_tokens:10000};
+      headers={'Content-Type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'};
+      url='https://api.anthropic.com/v1/messages';
+    }
 
-    // System prompt 加快取
-    if (sys) body.system=[{ type:'text', text:sys, cache_control:{ type:'ephemeral' } }];
-    if (thinkingEnabled) body.thinking={type:'enabled',budget_tokens:10000};
-    const res=await fetch('https://api.anthropic.com/v1/messages',{
-      method:'POST',
-      headers:{'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
-      body:JSON.stringify(body)
-    });
+    const res=await fetch(url,{method:'POST',headers,body:JSON.stringify(body)});
     if (!res.ok) { const err=await res.json().catch(()=>({})); throw new Error(err?.error?.message||`HTTP ${res.status}`); }
     const data=await res.json();
-    const thinkBlock=data.content?.find(b=>b.type==='thinking');
-    const textBlock=data.content?.find(b=>b.type==='text');
-    const thinkingText=thinkBlock?.thinking||null;
-    const reply=textBlock?.text||'（沒有回應）';
+
+    let reply, thinkingText=null;
+    if (useDS) {
+      reply=data.choices?.[0]?.message?.content||'（沒有回應）';
+      thinkingText=data.choices?.[0]?.message?.reasoning_content||null;
+    } else {
+      const thinkBlock=data.content?.find(b=>b.type==='thinking');
+      const textBlock=data.content?.find(b=>b.type==='text');
+      thinkingText=thinkBlock?.thinking||null;
+      reply=textBlock?.text||'（沒有回應）';
+    }
+
     tb.querySelector('.bubble').classList.remove('typing');
     tb.querySelector('.bt').textContent=reply;
     if (thinkingText) {
@@ -1027,7 +1124,6 @@ async function regenerateFrom(historyIdx) {
     }
     const assistantContent=thinkingText?[{type:'thinking',thinking:thinkingText},{type:'text',text:reply}]:reply;
     conv.history.push({role:'assistant',content:assistantContent});
-    // Add action buttons to the new bubble
     const newIdx=conv.history.length-1;
     const actions=document.createElement('div'); actions.className='bubble-actions show';
     const regenBtn=document.createElement('button'); regenBtn.className='action-btn'; regenBtn.textContent='↺ 重新生成';
@@ -1055,6 +1151,8 @@ function escHtml(t) { return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replac
 
 // ── Settings ──
 function openSettings() {
+  document.getElementById('set-claude-key').value=apiKey;
+  document.getElementById('set-ds-key').value=dsKey;
   document.getElementById('set-name').value=charName;
   document.getElementById('set-inst').value=instText;
   setAv('set-av-img','set-av-ph',avatarB64);
@@ -1064,6 +1162,10 @@ function openSettings() {
 document.getElementById('settings-panel').addEventListener('click', e=>{ if(e.target===document.getElementById('settings-panel')) document.getElementById('settings-panel').classList.remove('open'); });
 bindAv('set-av-btn','set-av-upload-btn','set-av-file','set-av-img','set-av-ph');
 document.getElementById('set-save-btn').addEventListener('click', ()=>{
+  const ck=document.getElementById('set-claude-key').value.trim();
+  const dk=document.getElementById('set-ds-key').value.trim();
+  if (ck) apiKey=ck;
+  if (dk) dsKey=dk;
   charName=document.getElementById('set-name').value.trim()||'角色';
   instText=document.getElementById('set-inst').value.trim();
   document.getElementById('hdr-name').textContent=charName;
