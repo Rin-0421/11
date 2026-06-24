@@ -894,6 +894,14 @@ document.getElementById('send-btn').addEventListener('click', send);
 
 function buildSystem() {
   const parts=[];
+  // 自動附上台灣當前時間
+  const now = new Date();
+  const twTime = new Intl.DateTimeFormat('zh-TW', {
+    timeZone: 'Asia/Taipei',
+    year: 'numeric', month: 'long', day: 'numeric',
+    weekday: 'long', hour: '2-digit', minute: '2-digit', hour12: false
+  }).format(now);
+  parts.push(`[當前台灣時間：${twTime}]`);
   if (docs.length) { parts.push('[知識文件]'); docs.forEach(d=>parts.push(`## ${d.name}\n${d.content}`)); }
   if (instText) parts.push('[指令]\n'+instText);
   return parts.join('\n\n');
