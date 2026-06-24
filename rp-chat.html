@@ -960,19 +960,8 @@ async function send() {
       headers = { 'Content-Type':'application/json', 'Authorization':`Bearer ${key}` };
       url = 'https://api.deepseek.com/chat/completions';
     } else {
-      // Claude 用 Anthropic 格式 + Prompt Caching
-      const cachedMessages = apiMessages.map((m, i) => {
-        if (i < apiMessages.length - 2) {
-          const content = typeof m.content === 'string'
-            ? [{ type: 'text', text: m.content, cache_control: { type: 'ephemeral' } }]
-            : Array.isArray(m.content)
-              ? [...m.content.slice(0,-1), { ...m.content[m.content.length-1], cache_control: { type: 'ephemeral' } }]
-              : m.content;
-          return { ...m, content };
-        }
-        return m;
-      });
-      body = { model, max_tokens: thinkingEnabled?16000:2048, messages: cachedMessages };
+      // Claude 用 Anthropic 格式，只對 system prompt 做 Prompt Caching
+      body = { model, max_tokens: thinkingEnabled?16000:2048, messages: apiMessages };
       if (sys) body.system = [{ type:'text', text:sys, cache_control:{ type:'ephemeral' } }];
       if (thinkingEnabled) body.thinking = { type:'enabled', budget_tokens:10000 };
       headers = { 'Content-Type':'application/json', 'x-api-key':key, 'anthropic-version':'2023-06-01', 'anthropic-dangerous-direct-browser-access':'true' };
@@ -1134,18 +1123,7 @@ async function regenerateFrom(historyIdx) {
       headers={'Content-Type':'application/json','Authorization':`Bearer ${key}`};
       url='https://api.deepseek.com/chat/completions';
     } else {
-      const cachedMessages=apiMessages.map((m,i)=>{
-        if (i<apiMessages.length-2) {
-          const content=typeof m.content==='string'
-            ?[{type:'text',text:m.content,cache_control:{type:'ephemeral'}}]
-            :Array.isArray(m.content)
-              ?[...m.content.slice(0,-1),{...m.content[m.content.length-1],cache_control:{type:'ephemeral'}}]
-              :m.content;
-          return {...m,content};
-        }
-        return m;
-      });
-      body={model,max_tokens:thinkingEnabled?16000:2048,messages:cachedMessages};
+      body={model,max_tokens:thinkingEnabled?16000:2048,messages:apiMessages};
       if (sys) body.system=[{type:'text',text:sys,cache_control:{type:'ephemeral'}}];
       if (thinkingEnabled) body.thinking={type:'enabled',budget_tokens:10000};
       headers={'Content-Type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'};
