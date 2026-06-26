@@ -387,6 +387,8 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
     <input class="finput" type="password" id="api-key-input" placeholder="sk-ant-api03-…" autocomplete="off">
     <label class="lbl">DeepSeek（選填）</label>
     <input class="finput" type="password" id="ds-key-input" placeholder="sk-…" autocomplete="off">
+    <label class="lbl">OpenAI（選填）</label>
+    <input class="finput" type="password" id="oai-key-input" placeholder="sk-…" autocomplete="off">
   </div>
   <div class="card">
     <div class="card-title">角色設定</div>
@@ -425,8 +427,12 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
           <option value="claude-opus-4-6">Opus 4.6（最強）</option>
         </optgroup>
         <optgroup label="── DeepSeek ──">
-          <option value="deepseek-v4-flash">V4 Flash（超省）</option>
-          <option value="deepseek-v4-pro">V4 Pro（旗艦）</option>
+          <option value="deepseek-v4-flash">DS V4 Flash（超省）</option>
+          <option value="deepseek-v4-pro">DS V4 Pro（旗艦）</option>
+        </optgroup>
+        <optgroup label="── OpenAI ──">
+          <option value="gpt-4o-2024-05-13">GPT-4o 早期版（5月）</option>
+          <option value="gpt-4o">GPT-4o（最新）</option>
         </optgroup>
       </select>
     </div>
@@ -475,6 +481,10 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
           <option value="deepseek-v4-flash">DS V4 Flash</option>
           <option value="deepseek-v4-pro">DS V4 Pro</option>
         </optgroup>
+        <optgroup label="OpenAI">
+          <option value="gpt-4o-2024-05-13">GPT-4o 早期版</option>
+          <option value="gpt-4o">GPT-4o 最新</option>
+        </optgroup>
       </select>
     </div>
   </div>
@@ -509,6 +519,8 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
     <input class="finput" type="password" id="set-claude-key" placeholder="sk-ant-api03-…" autocomplete="off">
     <label class="lbl">DeepSeek（選填）</label>
     <input class="finput" type="password" id="set-ds-key" placeholder="sk-…" autocomplete="off">
+    <label class="lbl">OpenAI（選填）</label>
+    <input class="finput" type="password" id="set-oai-key" placeholder="sk-…" autocomplete="off">
     <div class="sh-sec">角色頭像</div>
     <div class="av-row" style="margin-bottom:8px">
       <div class="av-circle" id="set-av-btn"><span id="set-av-ph">🎭</span><img id="set-av-img" style="display:none"></div>
@@ -557,7 +569,7 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
 <script>
 // ── State ──
 const SK = 'rp_v5';
-let apiKey = '', dsKey = '', charName = '', avatarB64 = '', docs = [], instText = '';
+let apiKey = '', dsKey = '', oaiKey = '', charName = '', avatarB64 = '', docs = [], instText = '';
 let thinkingEnabled = false;
 let conversations = []; // [{ id, name, history }]
 let currentConvId = null;
@@ -570,8 +582,17 @@ const KEEP_RECENT = 10;
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2); }
 function currentConv() { return conversations.find(c => c.id === currentConvId); }
 function isDeepSeek(model) { return model.startsWith('deepseek-'); }
-function getKey(model) { return isDeepSeek(model) ? dsKey : apiKey; }
-function getBaseUrl(model) { return isDeepSeek(model) ? 'https://api.deepseek.com/v1/messages' : 'https://api.anthropic.com/v1/messages'; }
+function isOpenAI(model) { return model.startsWith('gpt-') || model.startsWith('o1') || model.startsWith('o3'); }
+function getKey(model) {
+  if (isDeepSeek(model)) return dsKey;
+  if (isOpenAI(model)) return oaiKey;
+  return apiKey;
+}
+function getApiUrl(model) {
+  if (isDeepSeek(model)) return 'https://api.deepseek.com/chat/completions';
+  if (isOpenAI(model)) return 'https://api.openai.com/v1/chat/completions';
+  return 'https://api.anthropic.com/v1/messages';
+}
 
 // ── Load ──
 try {
@@ -579,6 +600,7 @@ try {
   if (s && s.apiKey) {
     apiKey = s.apiKey || '';
     dsKey = s.dsKey || '';
+    oaiKey = s.oaiKey || '';
     charName = s.charName || '';
     avatarB64 = s.avatarB64 || '';
     docs = s.docs || [];
@@ -602,7 +624,7 @@ try {
 function save() {
   try {
     localStorage.setItem(SK, JSON.stringify({
-      apiKey, dsKey, charName, avatarB64, docs, instText, thinkingEnabled,
+      apiKey, dsKey, oaiKey, charName, avatarB64, docs, instText, thinkingEnabled,
       conversations, currentConvId,
       model: document.getElementById('chat-model').value
     }));
@@ -634,12 +656,16 @@ function updateThinkBtn() {
 }
 document.getElementById('think-toggle').addEventListener('click', () => {
   const model = document.getElementById('chat-model').value;
-  if (!thinkingEnabled && model==='claude-haiku-4-5-20251001') { alert('延伸思考不支援 Haiku，請先切換模型。'); return; }
+  if (!thinkingEnabled && (model==='claude-haiku-4-5-20251001' || isOpenAI(model))) {
+    alert(isOpenAI(model) ? 'OpenAI 模型不支援延伸思考。' : '延伸思考不支援 Haiku，請先切換模型。'); return;
+  }
   thinkingEnabled = !thinkingEnabled; updateThinkBtn(); save();
 });
 document.getElementById('chat-model').addEventListener('change', () => {
-  if (thinkingEnabled && document.getElementById('chat-model').value==='claude-haiku-4-5-20251001') {
-    thinkingEnabled=false; updateThinkBtn(); alert('已自動關閉延伸思考（Haiku 不支援）');
+  const model = document.getElementById('chat-model').value;
+  if (thinkingEnabled && (model==='claude-haiku-4-5-20251001' || isOpenAI(model))) {
+    thinkingEnabled=false; updateThinkBtn();
+    alert(isOpenAI(model) ? '已自動關閉延伸思考（OpenAI 不支援）' : '已自動關閉延伸思考（Haiku 不支援）');
   }
   save();
 });
@@ -678,15 +704,17 @@ document.getElementById('set-add-doc-btn').addEventListener('click', ()=>addDoc(
 document.getElementById('start-btn').addEventListener('click', () => {
   const key = document.getElementById('api-key-input').value.trim();
   const dk = document.getElementById('ds-key-input').value.trim();
-  // 至少要有一個有效的 key
+  const ok = document.getElementById('oai-key-input').value.trim();
   const claudeOk = key.startsWith('sk-ant-');
   const dsOk = dk.startsWith('sk-');
-  if (!claudeOk && !dsOk) {
+  const oaiOk = ok.startsWith('sk-');
+  if (!claudeOk && !dsOk && !oaiOk) {
     document.getElementById('setup-err').style.display='block'; return;
   }
   document.getElementById('setup-err').style.display='none';
   if (claudeOk) apiKey=key;
   if (dsOk) dsKey=dk;
+  if (oaiOk) oaiKey=ok;
   charName=document.getElementById('char-name-input').value.trim()||'角色';
   instText=document.getElementById('inst-input').value.trim();
   document.getElementById('chat-model').value=document.getElementById('setup-model').value;
@@ -963,22 +991,34 @@ async function send() {
     });
 
     const useDS = isDeepSeek(model);
+    const useOAI = isOpenAI(model);
     const key = getKey(model);
-    if (!key) throw new Error(useDS ? '請先填入 DeepSeek API 金鑰' : '請先填入 Anthropic API 金鑰');
+    if (!key) throw new Error(useDS ? '請先填入 DeepSeek API 金鑰' : useOAI ? '請先填入 OpenAI API 金鑰' : '請先填入 Anthropic API 金鑰');
 
     let body, headers, url;
 
-    if (useDS) {
-      // DeepSeek 用 OpenAI 相容格式，system 放在 messages 第一則
-      const dsMessages = apiMessages.map(m=>({
-        role: m.role,
-        content: typeof m.content==='string' ? m.content
-          : Array.isArray(m.content) ? m.content.filter(b=>b.type==='text').map(b=>b.text).join('') : ''
-      }));
-      if (sys) dsMessages.unshift({ role: 'system', content: sys });
-      body = { model, max_tokens: 2048, messages: dsMessages };
-      headers = { 'Content-Type':'application/json', 'Authorization':`Bearer ${key}` };
-      url = 'https://api.deepseek.com/chat/completions';
+    if (useDS || useOAI) {
+      // DeepSeek / OpenAI 用 OpenAI 相容格式
+      const oaiMessages = apiMessages.map(m => {
+        const role = m.role;
+        if (Array.isArray(m.content)) {
+          // 處理含圖片的訊息
+          const parts = [];
+          for (const b of m.content) {
+            if (b.type === 'text') parts.push({ type: 'text', text: b.text });
+            else if (b.type === 'image' && useOAI) {
+              parts.push({ type: 'image_url', image_url: { url: `data:${b.source.media_type};base64,${b.source.data}` } });
+            }
+          }
+          return { role, content: parts.length ? parts : m.content.filter(b=>b.type==='text').map(b=>b.text).join('') };
+        }
+        return { role, content: typeof m.content === 'string' ? m.content : '' };
+      });
+      const sys = buildSystem();
+      if (sys) oaiMessages.unshift({ role: 'system', content: sys });
+      body = { model, max_tokens: 2048, messages: oaiMessages };
+      headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
+      url = useDS ? 'https://api.deepseek.com/chat/completions' : 'https://api.openai.com/v1/chat/completions';
     } else {
       // Claude 用 Anthropic 格式，只對 system prompt 做 Prompt Caching
       body = { model, max_tokens: thinkingEnabled?16000:2048, messages: apiMessages };
@@ -993,9 +1033,8 @@ async function send() {
     const data=await res.json();
 
     let reply, thinkingText=null;
-    if (useDS) {
+    if (useDS || useOAI) {
       reply = data.choices?.[0]?.message?.content || '（沒有回應）';
-      // DeepSeek 思考內容在 reasoning_content
       thinkingText = data.choices?.[0]?.message?.reasoning_content || null;
     } else {
       const thinkBlock=data.content?.find(b=>b.type==='thinking');
@@ -1129,19 +1168,28 @@ async function regenerateFrom(historyIdx) {
     });
 
     const useDS=isDeepSeek(model);
+    const useOAI=isOpenAI(model);
     const key=getKey(model);
-    if (!key) throw new Error(useDS?'請先填入 DeepSeek API 金鑰':'請先填入 Anthropic API 金鑰');
+    if (!key) throw new Error(useDS?'請先填入 DeepSeek API 金鑰':useOAI?'請先填入 OpenAI API 金鑰':'請先填入 Anthropic API 金鑰');
 
     let body, headers, url;
-    if (useDS) {
-      const dsMessages=apiMessages.map(m=>({
-        role:m.role,
-        content:typeof m.content==='string'?m.content:Array.isArray(m.content)?m.content.filter(b=>b.type==='text').map(b=>b.text).join(''):''
-      }));
-      if (sys) dsMessages.unshift({ role:'system', content:sys });
-      body={model,max_tokens:2048,messages:dsMessages};
+    if (useDS || useOAI) {
+      const oaiMessages=apiMessages.map(m=>{
+        if (Array.isArray(m.content)) {
+          const parts=[];
+          for (const b of m.content) {
+            if (b.type==='text') parts.push({type:'text',text:b.text});
+            else if (b.type==='image'&&useOAI) parts.push({type:'image_url',image_url:{url:`data:${b.source.media_type};base64,${b.source.data}`}});
+          }
+          return {role:m.role,content:parts.length?parts:m.content.filter(b=>b.type==='text').map(b=>b.text).join('')};
+        }
+        return {role:m.role,content:typeof m.content==='string'?m.content:''};
+      });
+      const sys=buildSystem();
+      if (sys) oaiMessages.unshift({role:'system',content:sys});
+      body={model,max_tokens:2048,messages:oaiMessages};
       headers={'Content-Type':'application/json','Authorization':`Bearer ${key}`};
-      url='https://api.deepseek.com/chat/completions';
+      url=useDS?'https://api.deepseek.com/chat/completions':'https://api.openai.com/v1/chat/completions';
     } else {
       body={model,max_tokens:thinkingEnabled?16000:2048,messages:apiMessages};
       if (sys) body.system=[{type:'text',text:sys,cache_control:{type:'ephemeral'}}];
@@ -1155,7 +1203,7 @@ async function regenerateFrom(historyIdx) {
     const data=await res.json();
 
     let reply, thinkingText=null;
-    if (useDS) {
+    if (useDS||useOAI) {
       reply=data.choices?.[0]?.message?.content||'（沒有回應）';
       thinkingText=data.choices?.[0]?.message?.reasoning_content||null;
     } else {
@@ -1203,6 +1251,7 @@ function escHtml(t) { return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replac
 function openSettings() {
   document.getElementById('set-claude-key').value=apiKey;
   document.getElementById('set-ds-key').value=dsKey;
+  document.getElementById('set-oai-key').value=oaiKey;
   document.getElementById('set-name').value=charName;
   document.getElementById('set-inst').value=instText;
   setAv('set-av-img','set-av-ph',avatarB64);
@@ -1214,8 +1263,10 @@ bindAv('set-av-btn','set-av-upload-btn','set-av-file','set-av-img','set-av-ph');
 document.getElementById('set-save-btn').addEventListener('click', ()=>{
   const ck=document.getElementById('set-claude-key').value.trim();
   const dk=document.getElementById('set-ds-key').value.trim();
+  const ok=document.getElementById('set-oai-key').value.trim();
   if (ck) apiKey=ck;
   if (dk) dsKey=dk;
+  if (ok) oaiKey=ok;
   charName=document.getElementById('set-name').value.trim()||'角色';
   instText=document.getElementById('set-inst').value.trim();
   document.getElementById('hdr-name').textContent=charName;
