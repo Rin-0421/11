@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>RP Chat</title>
-<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@300;400;500&display=swap" rel="stylesheet">
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
@@ -24,7 +23,7 @@
   --think-border: #3d2e6b;
 }
 body {
-  font-family: 'Noto Serif TC', Georgia, serif;
+  font-family: -apple-system, 'Segoe UI', system-ui, sans-serif;
   background: var(--bg); color: var(--text);
   height: 100dvh; display: flex; flex-direction: column; overflow: hidden;
 }
@@ -221,7 +220,7 @@ body {
   display: flex; align-items: center; justify-content: center; font-size: 17px;
 }
 .hdr-av img { width: 100%; height: 100%; object-fit: cover; }
-.hdr-name { font-size: 15px; font-weight: 600; flex: 1; }
+.hdr-name { font-size: 13px; font-weight: 600; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hdr-btns { display: flex; gap: 6px; align-items: center; }
 .hdr-select {
   background: var(--bg); border: 1px solid var(--border);
@@ -269,6 +268,7 @@ body {
 .bubble {
   padding: 9px 13px; border-radius: 18px;
   font-size: 15px; line-height: 1.75;
+  font-family: Georgia, 'Times New Roman', -apple-system, system-ui, sans-serif;
   white-space: pre-wrap; word-break: break-word;
 }
 .msg-row.assistant .bubble { background: var(--ai-bubble); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
