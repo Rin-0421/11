@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>RP Chat</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@300;400;500&display=swap" rel="stylesheet">
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
@@ -23,7 +24,7 @@
   --think-border: #3d2e6b;
 }
 body {
-  font-family: -apple-system,'Segoe UI',system-ui,sans-serif;
+  font-family: 'Noto Serif TC', Georgia, serif;
   background: var(--bg); color: var(--text);
   height: 100dvh; display: flex; flex-direction: column; overflow: hidden;
 }
@@ -237,11 +238,17 @@ body {
 .icon-btn:hover { color: var(--accent); background: var(--surface2); }
 .think-toggle {
   background: none; border: 1px solid var(--border);
-  color: var(--text-dim); font-size: 11px; padding: 4px 8px;
-  border-radius: 6px; cursor: pointer; transition: all .15s; white-space: nowrap;
+  color: var(--text-dim); font-size: 16px; padding: 5px 8px;
+  border-radius: 8px; cursor: pointer; transition: all .2s; white-space: nowrap;
+  line-height: 1;
 }
 .think-toggle:hover { border-color: var(--accent); color: var(--accent); }
-.think-toggle.on { border-color: var(--accent); color: var(--accent); background: rgba(179,136,255,.12); }
+.think-toggle.on {
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: 0 0 8px var(--accent), 0 0 16px rgba(179,136,255,0.3);
+  background: rgba(179,136,255,0.08);
+}
 
 /* Messages */
 #messages {
@@ -261,7 +268,7 @@ body {
 .msg-name { font-size: 11px; color: var(--text-dim); margin-bottom: 3px; padding-left: 2px; }
 .bubble {
   padding: 9px 13px; border-radius: 18px;
-  font-size: 14px; line-height: 1.6;
+  font-size: 15px; line-height: 1.75;
   white-space: pre-wrap; word-break: break-word;
 }
 .msg-row.assistant .bubble { background: var(--ai-bubble); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
@@ -469,8 +476,8 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
     <div class="hdr-av" id="hdr-av"><span id="hdr-av-ph">🎭</span><img id="hdr-av-img" style="display:none"></div>
     <span class="hdr-name" id="hdr-name">角色</span>
     <div class="hdr-btns">
-      <button class="think-toggle" id="think-toggle">💭 思考</button>
-      <button class="think-toggle" id="search-toggle">🔍 搜尋</button>
+      <button class="think-toggle" id="think-toggle" title="延伸思考">💭</button>
+      <button class="think-toggle" id="search-toggle" title="網路搜尋">🔍</button>
       <select class="hdr-select" id="chat-model">
         <optgroup label="Claude">
           <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
@@ -654,14 +661,14 @@ bindAv('s-av-btn','s-av-upload-btn','s-av-file','s-av-img','s-av-ph');
 // ── Thinking ──
 function updateThinkBtn() {
   const btn = document.getElementById('think-toggle');
-  if (thinkingEnabled) { btn.classList.add('on'); btn.textContent='💭 思考 ON'; }
-  else { btn.classList.remove('on'); btn.textContent='💭 思考'; }
+  if (thinkingEnabled) btn.classList.add('on');
+  else btn.classList.remove('on');
 }
 
 function updateSearchBtn() {
   const btn = document.getElementById('search-toggle');
-  if (searchEnabled) { btn.classList.add('on'); btn.textContent='🔍 搜尋 ON'; }
-  else { btn.classList.remove('on'); btn.textContent='🔍 搜尋'; }
+  if (searchEnabled) btn.classList.add('on');
+  else btn.classList.remove('on');
 }
 
 document.getElementById('search-toggle').addEventListener('click', () => {
