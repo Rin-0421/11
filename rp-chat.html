@@ -470,6 +470,7 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
     <span class="hdr-name" id="hdr-name">角色</span>
     <div class="hdr-btns">
       <button class="think-toggle" id="think-toggle">💭 思考</button>
+      <button class="think-toggle" id="search-toggle">🔍 搜尋</button>
       <select class="hdr-select" id="chat-model">
         <optgroup label="Claude">
           <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
@@ -571,6 +572,7 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
 const SK = 'rp_v5';
 let apiKey = '', dsKey = '', oaiKey = '', charName = '', avatarB64 = '', docs = [], instText = '';
 let thinkingEnabled = false;
+let searchEnabled = false;
 let conversations = []; // [{ id, name, history }]
 let currentConvId = null;
 let pendingFile = null, isLoading = false;
@@ -606,6 +608,7 @@ try {
     docs = s.docs || [];
     instText = s.instText || '';
     thinkingEnabled = s.thinkingEnabled || false;
+    searchEnabled = s.searchEnabled || false;
     conversations = s.conversations || [];
     currentConvId = s.currentConvId || null;
     document.getElementById('chat-model').value = s.model || 'claude-sonnet-4-6';
@@ -624,7 +627,7 @@ try {
 function save() {
   try {
     localStorage.setItem(SK, JSON.stringify({
-      apiKey, dsKey, oaiKey, charName, avatarB64, docs, instText, thinkingEnabled,
+      apiKey, dsKey, oaiKey, charName, avatarB64, docs, instText, thinkingEnabled, searchEnabled,
       conversations, currentConvId,
       model: document.getElementById('chat-model').value
     }));
@@ -654,6 +657,21 @@ function updateThinkBtn() {
   if (thinkingEnabled) { btn.classList.add('on'); btn.textContent='💭 思考 ON'; }
   else { btn.classList.remove('on'); btn.textContent='💭 思考'; }
 }
+
+function updateSearchBtn() {
+  const btn = document.getElementById('search-toggle');
+  if (searchEnabled) { btn.classList.add('on'); btn.textContent='🔍 搜尋 ON'; }
+  else { btn.classList.remove('on'); btn.textContent='🔍 搜尋'; }
+}
+
+document.getElementById('search-toggle').addEventListener('click', () => {
+  const model = document.getElementById('chat-model').value;
+  if (!searchEnabled && isDeepSeek(model)) {
+    alert('DeepSeek 不支援搜尋功能。'); return;
+  }
+  searchEnabled = !searchEnabled;
+  updateSearchBtn(); save();
+});
 document.getElementById('think-toggle').addEventListener('click', () => {
   const model = document.getElementById('chat-model').value;
   if (!thinkingEnabled && (model==='claude-haiku-4-5-20251001' || isOpenAI(model))) {
@@ -666,6 +684,10 @@ document.getElementById('chat-model').addEventListener('change', () => {
   if (thinkingEnabled && (model==='claude-haiku-4-5-20251001' || isOpenAI(model))) {
     thinkingEnabled=false; updateThinkBtn();
     alert(isOpenAI(model) ? '已自動關閉延伸思考（OpenAI 不支援）' : '已自動關閉延伸思考（Haiku 不支援）');
+  }
+  if (searchEnabled && isDeepSeek(model)) {
+    searchEnabled=false; updateSearchBtn();
+    alert('已自動關閉搜尋（DeepSeek 不支援）');
   }
   save();
 });
@@ -729,6 +751,7 @@ function showChat() {
   document.getElementById('hdr-name').textContent=charName||'角色';
   setAv('hdr-av-img','hdr-av-ph',avatarB64);
   updateThinkBtn();
+  updateSearchBtn();
   document.getElementById('user-input').focus();
 }
 
@@ -1017,6 +1040,7 @@ async function send() {
       const sys = buildSystem();
       if (sys) oaiMessages.unshift({ role: 'system', content: sys });
       body = { model, max_tokens: 2048, messages: oaiMessages };
+      if (useOAI && searchEnabled) body.tools = [{ type: 'web_search_preview' }];
       headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
       url = useDS ? 'https://api.deepseek.com/chat/completions' : 'https://api.openai.com/v1/chat/completions';
     } else {
@@ -1024,6 +1048,7 @@ async function send() {
       body = { model, max_tokens: thinkingEnabled?16000:2048, messages: apiMessages };
       if (sys) body.system = [{ type:'text', text:sys, cache_control:{ type:'ephemeral' } }];
       if (thinkingEnabled) body.thinking = { type:'enabled', budget_tokens:10000 };
+      if (searchEnabled) body.tools = [{ type:'web_search_20250305', name:'web_search' }];
       headers = { 'Content-Type':'application/json', 'x-api-key':key, 'anthropic-version':'2023-06-01', 'anthropic-dangerous-direct-browser-access':'true' };
       url = 'https://api.anthropic.com/v1/messages';
     }
@@ -1188,12 +1213,14 @@ async function regenerateFrom(historyIdx) {
       const sys=buildSystem();
       if (sys) oaiMessages.unshift({role:'system',content:sys});
       body={model,max_tokens:2048,messages:oaiMessages};
+      if (useOAI && searchEnabled) body.tools=[{type:'web_search_preview'}];
       headers={'Content-Type':'application/json','Authorization':`Bearer ${key}`};
       url=useDS?'https://api.deepseek.com/chat/completions':'https://api.openai.com/v1/chat/completions';
     } else {
       body={model,max_tokens:thinkingEnabled?16000:2048,messages:apiMessages};
       if (sys) body.system=[{type:'text',text:sys,cache_control:{type:'ephemeral'}}];
       if (thinkingEnabled) body.thinking={type:'enabled',budget_tokens:10000};
+      if (searchEnabled) body.tools=[{type:'web_search_20250305',name:'web_search'}];
       headers={'Content-Type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'};
       url='https://api.anthropic.com/v1/messages';
     }
