@@ -3,7 +3,22 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-<title>RP Chat</title>
+<title>Chat</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Chat">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0d0b12">
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='50' fill='white'/%3E%3C/svg%3E">
+<script>
+(function(){
+  const icon="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='50' fill='white'/%3E%3C/svg%3E";
+  const m={name:"Chat",short_name:"Chat",display:"standalone",start_url:location.href,background_color:"#0d0b12",theme_color:"#0d0b12",icons:[{src:icon,sizes:"any",type:"image/svg+xml",purpose:"any maskable"}]};
+  const b=new Blob([JSON.stringify(m)],{type:"application/json"});
+  const l=document.createElement("link");l.rel="manifest";l.href=URL.createObjectURL(b);
+  document.currentScript.after(l);
+})();
+</script>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
