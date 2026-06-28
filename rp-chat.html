@@ -1090,6 +1090,15 @@ async function send() {
     regenBtn.addEventListener('click', ()=>regenerateFrom(newIdx));
     actions.appendChild(regenBtn);
     tb.querySelector('.msg-col').appendChild(actions);
+    // 清除 user message 裡的圖片/PDF base64，節省 localStorage 空間
+    const userMsg = conv.history[userIdx];
+    if (Array.isArray(userMsg?.content)) {
+      userMsg.content = userMsg.content.map(b => {
+        if (b.type === 'image') return { type: 'text', text: '[圖片]' };
+        if (b.type === 'document') return { type: 'text', text: '[PDF 文件]' };
+        return b;
+      });
+    }
     save(); renderConvList();
     await maybeCompress();
   } catch(e) {
