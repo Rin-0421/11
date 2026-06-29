@@ -1028,14 +1028,7 @@ function buildSystem() {
   const parts=[];
   if (docs.length) { parts.push('[知識文件]'); docs.forEach(d=>parts.push(`## ${d.name}\n${d.content}`)); }
   if (instText) parts.push('[指令]\n'+instText);
-  // 時間放最後，避免破壞前面內容的 Prompt Cache
-  const now = new Date();
-  const twTime = new Intl.DateTimeFormat('zh-TW', {
-    timeZone: 'Asia/Taipei',
-    year: 'numeric', month: 'long', day: 'numeric',
-    weekday: 'long', hour: '2-digit', minute: '2-digit', hour12: false
-  }).format(now);
-  parts.push(`[當前台灣時間：${twTime}]`);
+  parts.push('每則用戶訊息的開頭包含當前台灣時間，請以該時間為準，不得自行估算或編造時間。');
   return parts.join('\n\n');
 }
 
@@ -1128,7 +1121,7 @@ async function send() {
       if (thinkingEnabled) body.thinking = { type:'enabled', budget_tokens:10000 };
       if (searchEnabled) body.tools = [{ type:'web_search_20250305', name:'web_search' }];
       body.stream = true;
-      headers = { 'Content-Type':'application/json', 'x-api-key':key, 'anthropic-version':'2023-06-01', 'anthropic-dangerous-direct-browser-access':'true' };
+      headers = { 'Content-Type':'application/json', 'x-api-key':key, 'anthropic-version':'2023-06-01', 'anthropic-dangerous-direct-browser-access':'true', 'anthropic-beta':'interleaved-thinking-2025-05-14' };
       url = 'https://api.anthropic.com/v1/messages';
     }
 
@@ -1368,7 +1361,7 @@ async function regenerateFrom(historyIdx) {
       if (thinkingEnabled) body.thinking={type:'enabled',budget_tokens:10000};
       if (searchEnabled) body.tools=[{type:'web_search_20250305',name:'web_search'}];
       body.stream=true;
-      headers={'Content-Type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'};
+      headers={'Content-Type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true','anthropic-beta':'interleaved-thinking-2025-05-14'};
       url='https://api.anthropic.com/v1/messages';
     }
 
