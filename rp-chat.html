@@ -453,15 +453,15 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
         <optgroup label="── Claude ──">
           <option value="claude-haiku-4-5-20251001">Haiku 4.5（最省）</option>
           <option value="claude-sonnet-4-6" selected>Sonnet 4.6（推薦）</option>
+          <option value="claude-opus-4-7">Opus 4.7（最新）</option>
           <option value="claude-opus-4-5">Opus 4.5（省 token）</option>
-          <option value="claude-opus-4-6">Opus 4.6（最強）</option>
+          <option value="claude-opus-4-6">Opus 4.6</option>
         </optgroup>
         <optgroup label="── DeepSeek ──">
           <option value="deepseek-v4-flash">DS V4 Flash（超省）</option>
           <option value="deepseek-v4-pro">DS V4 Pro（旗艦）</option>
         </optgroup>
         <optgroup label="── OpenAI ──">
-          <option value="gpt-4o-mini-2024-07-18">GPT-4o mini（推薦）</option>
           <option value="gpt-4o-2024-05-13">GPT-4o 5月版</option>
           <option value="gpt-4.1">GPT-4.1</option>
         </optgroup>
@@ -506,6 +506,7 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
         <optgroup label="Claude">
           <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
           <option value="claude-sonnet-4-6" selected>Sonnet 4.6</option>
+          <option value="claude-opus-4-7">Opus 4.7</option>
           <option value="claude-opus-4-5">Opus 4.5</option>
           <option value="claude-opus-4-6">Opus 4.6</option>
         </optgroup>
@@ -514,7 +515,6 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
           <option value="deepseek-v4-pro">DS V4 Pro</option>
         </optgroup>
         <optgroup label="OpenAI">
-          <option value="gpt-4o-mini-2024-07-18">GPT-4o mini</option>
           <option value="gpt-4o-2024-05-13">GPT-4o 5月版</option>
           <option value="gpt-4.1">GPT-4.1</option>
         </optgroup>
@@ -1118,7 +1118,7 @@ async function send() {
       // Claude 用 Anthropic 格式，只對 system prompt 做 Prompt Caching
       body = { model, max_tokens: thinkingEnabled?16000:2048, messages: apiMessages };
       if (sys) body.system = [{ type:'text', text:sys, cache_control:{ type:'ephemeral' } }];
-      if (thinkingEnabled) body.thinking = { type:'enabled', budget_tokens:10000 };
+      if (thinkingEnabled) body.thinking = model==='claude-opus-4-7' ? { type:'adaptive' } : { type:'enabled', budget_tokens:10000 };
       if (searchEnabled) body.tools = [{ type:'web_search_20250305', name:'web_search' }];
       body.stream = true;
       headers = { 'Content-Type':'application/json', 'x-api-key':key, 'anthropic-version':'2023-06-01', 'anthropic-dangerous-direct-browser-access':'true', 'anthropic-beta':'interleaved-thinking-2025-05-14' };
@@ -1358,7 +1358,7 @@ async function regenerateFrom(historyIdx) {
     } else {
       body={model,max_tokens:thinkingEnabled?16000:2048,messages:apiMessages};
       if (sys) body.system=[{type:'text',text:sys,cache_control:{type:'ephemeral'}}];
-      if (thinkingEnabled) body.thinking={type:'enabled',budget_tokens:10000};
+      if (thinkingEnabled) body.thinking=model==='claude-opus-4-7'?{type:'adaptive'}:{type:'enabled',budget_tokens:10000};
       if (searchEnabled) body.tools=[{type:'web_search_20250305',name:'web_search'}];
       body.stream=true;
       headers={'Content-Type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true','anthropic-beta':'interleaved-thinking-2025-05-14'};
