@@ -1164,6 +1164,9 @@ async function send() {
     conv.history.push({role:'assistant',content:thinkingText?[{type:'thinking',thinking:thinkingText},{type:'text',text:reply}]:reply});
     const newIdx=conv.history.length-1;
     const actions=document.createElement('div'); actions.className='bubble-actions show';
+    const copyBtnS=document.createElement('button'); copyBtnS.className='action-btn'; copyBtnS.textContent='複製';
+    copyBtnS.addEventListener('click', ()=>{ navigator.clipboard.writeText(reply).then(()=>{ copyBtnS.textContent='✓'; setTimeout(()=>copyBtnS.textContent='複製',1200); }); });
+    actions.appendChild(copyBtnS);
     const regenBtn=document.createElement('button'); regenBtn.className='action-btn'; regenBtn.textContent='↺ 重新生成';
     regenBtn.addEventListener('click', ()=>regenerateFrom(newIdx));
     actions.appendChild(regenBtn);
@@ -1238,7 +1241,7 @@ function addBubble(role,text,typing,extra,thinkingText,historyIdx) {
     actions.className='bubble-actions';
     if (role==='user') {
       const copyBtn=document.createElement('button');
-      copyBtn.className='copy-btn'; copyBtn.textContent='複製';
+      copyBtn.className='action-btn'; copyBtn.textContent='複製';
       copyBtn.addEventListener('click', e=>{ e.stopPropagation(); navigator.clipboard.writeText(text).then(()=>{ copyBtn.textContent='✓'; setTimeout(()=>copyBtn.textContent='複製',1200); }); });
       actions.appendChild(copyBtn);
       const editBtn=document.createElement('button');
@@ -1250,7 +1253,7 @@ function addBubble(role,text,typing,extra,thinkingText,historyIdx) {
       bbl.addEventListener('click', e=>{ e.stopPropagation(); actions.classList.toggle('show'); });
     } else {
       const copyBtn2=document.createElement('button');
-      copyBtn2.className='copy-btn'; copyBtn2.textContent='複製';
+      copyBtn2.className='action-btn'; copyBtn2.textContent='複製';
       copyBtn2.addEventListener('click', e=>{ e.stopPropagation(); navigator.clipboard.writeText(text).then(()=>{ copyBtn2.textContent='✓'; setTimeout(()=>copyBtn2.textContent='複製',1200); }); });
       actions.appendChild(copyBtn2);
       const regenBtn=document.createElement('button');
@@ -1392,6 +1395,9 @@ async function regenerateFrom(historyIdx) {
     conv.history.push({role:'assistant',content:assistantContent});
     const newIdx=conv.history.length-1;
     const actions=document.createElement('div'); actions.className='bubble-actions show';
+    const copyBtnS=document.createElement('button'); copyBtnS.className='action-btn'; copyBtnS.textContent='複製';
+    copyBtnS.addEventListener('click', ()=>{ navigator.clipboard.writeText(reply).then(()=>{ copyBtnS.textContent='✓'; setTimeout(()=>copyBtnS.textContent='複製',1200); }); });
+    actions.appendChild(copyBtnS);
     const regenBtn=document.createElement('button'); regenBtn.className='action-btn'; regenBtn.textContent='↺ 重新生成';
     regenBtn.addEventListener('click', ()=>regenerateFrom(newIdx));
     actions.appendChild(regenBtn);
