@@ -325,6 +325,8 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
 .bubble-actions.show { display: flex; }
 .msg-row.user .bubble-actions { justify-content: flex-end; }
 .msg-row.assistant .bubble-actions { justify-content: flex-start; padding-left: 2px; }
+.copy-btn { background:none; border:none; color:var(--text-dim); font-size:11px; cursor:pointer; padding:2px 5px; border-radius:4px; opacity:0.5; transition:opacity .15s; }
+.copy-btn:hover { opacity:1; }
 .action-btn {
   background: none; border: 1px solid var(--border);
   color: var(--text-dim); font-size: 11px; padding: 3px 9px;
@@ -534,7 +536,8 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
       <input type="file" id="file-input" accept="image/*,.pdf" style="display:none">
       <textarea id="user-input" placeholder="輸入訊息…" rows="1"></textarea>
       <button class="send-btn" id="send-btn">
-        <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+        <svg id="send-icon" viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+        <svg id="stop-icon" viewBox="0 0 24 24" style="display:none"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
       </button>
     </div>
   </div>
@@ -618,7 +621,7 @@ let thinkingEnabled = false;
 let searchEnabled = false;
 let conversations = []; // [{ id, name, history }]
 let currentConvId = null;
-let pendingFile = null, isLoading = false;
+let pendingFile = null, isLoading = false, abortCtrl = null;
 
 const COMPRESS_THRESHOLD = 40;
 const KEEP_RECENT = 10;
@@ -1016,7 +1019,10 @@ ui.addEventListener('keydown', e=>{
     // 讓 Enter 正常換行，不攔截
   }
 });
-document.getElementById('send-btn').addEventListener('click', send);
+document.getElementById('send-btn').addEventListener('click', () => {
+  if (isLoading && abortCtrl) { abortCtrl.abort(); }
+  else { send(); }
+});
 
 function buildSystem() {
   const parts=[];
@@ -1040,7 +1046,10 @@ async function send() {
   const text = ui.value.trim();
   if ((!text&&!pendingFile)||isLoading) return;
   isLoading=true;
-  document.getElementById('send-btn').disabled=true;
+  abortCtrl = new AbortController();
+  document.getElementById('send-btn').disabled=false;
+  document.getElementById('send-icon').style.display='none';
+  document.getElementById('stop-icon').style.display='';
   ui.value=''; ui.style.height='auto';
 
   let content, extra=null;
@@ -1121,7 +1130,7 @@ async function send() {
       url = 'https://api.anthropic.com/v1/messages';
     }
 
-    const res=await fetch(url,{ method:'POST', headers, body:JSON.stringify(body) });
+    const res=await fetch(url,{ method:'POST', headers, body:JSON.stringify(body), signal:abortCtrl.signal });
     if (!res.ok) { const err=await res.json().catch(()=>({})); throw new Error(err?.error?.message||`HTTP ${res.status}`); }
     const data=await res.json();
 
@@ -1137,7 +1146,15 @@ async function send() {
     }
 
     tb.querySelector('.bubble').classList.remove('typing');
-    tb.querySelector('.bt').textContent=reply;
+
+    const _btEl = tb.querySelector('.bt');
+    renderBt(_btEl, reply);
+    const _bbl = tb.querySelector('.bubble');
+    if (_bbl && !_bbl.querySelector('.msg-time')) {
+      const _twNow = new Date().toLocaleTimeString('zh-TW', {timeZone:'Asia/Taipei', hour:'2-digit', minute:'2-digit', hour12:false});
+      const _tEl = document.createElement('span'); _tEl.className='msg-time'; _tEl.textContent=_twNow;
+      _bbl.appendChild(_tEl);
+    }
     if (thinkingText) {
       const thinkEl=document.createElement('details');
       thinkEl.className='thinking-block';
@@ -1164,16 +1181,26 @@ async function send() {
     await maybeCompress();
   } catch(e) {
     tb.querySelector('.bubble').classList.remove('typing');
-    tb.querySelector('.bt').textContent='⚠ 錯誤：'+e.message;
-    conv.history.pop();
+    if (e.name === 'AbortError') {
+      tb.remove(); conv.history.pop();
+    } else {
+      tb.querySelector('.bt').textContent='⚠ 錯誤：'+e.message;
+      conv.history.pop();
+    }
   }
 
-  isLoading=false;
+  isLoading=false; abortCtrl=null;
+  document.getElementById('send-icon').style.display='';
+  document.getElementById('stop-icon').style.display='none';
   document.getElementById('send-btn').disabled=false;
   ui.focus(); scrollBot();
 }
 
 // ── Bubble ──
+function renderBt(el, text) {
+  const _esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  el.innerHTML = text.split(/\n\n+/).map(p => '<p>' + _esc(p).replace(/\n/g,'<br>') + '</p>').join('');
+}
 function addBubble(role,text,typing,extra,thinkingText,historyIdx) {
   const msgs=document.getElementById('messages');
   const row=document.createElement('div');
@@ -1196,8 +1223,7 @@ function addBubble(role,text,typing,extra,thinkingText,historyIdx) {
     else if (extra.type==='pdf') { const bd=document.createElement('div'); bd.className='pdf-badge'; bd.innerHTML=`📄 ${extra.name}`; bbl.appendChild(bd); }
   }
   const sp=document.createElement('span'); sp.className='bt';
-  const _esc=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  sp.innerHTML=text.split(/\n\n+/).map(p=>'<p>'+_esc(p).replace(/\n/g,'<br>')+'</p>').join('');
+  if (!typing) renderBt(sp, text);
   bbl.appendChild(sp);
   if (!typing) {
     const _twNow = new Date().toLocaleTimeString('zh-TW', {timeZone:'Asia/Taipei', hour:'2-digit', minute:'2-digit', hour12:false});
@@ -1211,6 +1237,10 @@ function addBubble(role,text,typing,extra,thinkingText,historyIdx) {
     const actions=document.createElement('div');
     actions.className='bubble-actions';
     if (role==='user') {
+      const copyBtn=document.createElement('button');
+      copyBtn.className='copy-btn'; copyBtn.textContent='複製';
+      copyBtn.addEventListener('click', e=>{ e.stopPropagation(); navigator.clipboard.writeText(text).then(()=>{ copyBtn.textContent='✓'; setTimeout(()=>copyBtn.textContent='複製',1200); }); });
+      actions.appendChild(copyBtn);
       const editBtn=document.createElement('button');
       editBtn.className='action-btn'; editBtn.textContent='✏ 編輯';
       editBtn.addEventListener('click', e=>{ e.preventDefault(); e.stopPropagation(); editMessage(historyIdx); });
@@ -1219,6 +1249,10 @@ function addBubble(role,text,typing,extra,thinkingText,historyIdx) {
       bbl.style.cursor='pointer';
       bbl.addEventListener('click', e=>{ e.stopPropagation(); actions.classList.toggle('show'); });
     } else {
+      const copyBtn2=document.createElement('button');
+      copyBtn2.className='copy-btn'; copyBtn2.textContent='複製';
+      copyBtn2.addEventListener('click', e=>{ e.stopPropagation(); navigator.clipboard.writeText(text).then(()=>{ copyBtn2.textContent='✓'; setTimeout(()=>copyBtn2.textContent='複製',1200); }); });
+      actions.appendChild(copyBtn2);
       const regenBtn=document.createElement('button');
       regenBtn.className='action-btn'; regenBtn.textContent='↺ 重新生成';
       regenBtn.addEventListener('click', e=>{ e.preventDefault(); e.stopPropagation(); regenerateFrom(historyIdx); });
@@ -1340,7 +1374,15 @@ async function regenerateFrom(historyIdx) {
     }
 
     tb.querySelector('.bubble').classList.remove('typing');
-    tb.querySelector('.bt').textContent=reply;
+
+    const _btEl = tb.querySelector('.bt');
+    renderBt(_btEl, reply);
+    const _bbl = tb.querySelector('.bubble');
+    if (_bbl && !_bbl.querySelector('.msg-time')) {
+      const _twNow = new Date().toLocaleTimeString('zh-TW', {timeZone:'Asia/Taipei', hour:'2-digit', minute:'2-digit', hour12:false});
+      const _tEl = document.createElement('span'); _tEl.className='msg-time'; _tEl.textContent=_twNow;
+      _bbl.appendChild(_tEl);
+    }
     if (thinkingText) {
       const thinkEl=document.createElement('details'); thinkEl.className='thinking-block';
       thinkEl.innerHTML=`<summary class="thinking-summary">思考過程</summary><div class="thinking-content">${escHtml(thinkingText)}</div>`;
