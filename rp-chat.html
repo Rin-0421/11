@@ -1118,6 +1118,7 @@ async function send() {
       if (sys) oaiMessages.unshift({ role: 'system', content: sys });
       body = { model, max_tokens: 2048, messages: oaiMessages };
       if (useOAI && searchEnabled) body.tools = [{ type: 'web_search_preview' }];
+      body.stream = true;
       headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
       url = useDS ? 'https://api.deepseek.com/chat/completions' : 'https://api.openai.com/v1/chat/completions';
     } else {
@@ -1126,40 +1127,45 @@ async function send() {
       if (sys) body.system = [{ type:'text', text:sys, cache_control:{ type:'ephemeral' } }];
       if (thinkingEnabled) body.thinking = { type:'enabled', budget_tokens:10000 };
       if (searchEnabled) body.tools = [{ type:'web_search_20250305', name:'web_search' }];
+      body.stream = true;
       headers = { 'Content-Type':'application/json', 'x-api-key':key, 'anthropic-version':'2023-06-01', 'anthropic-dangerous-direct-browser-access':'true' };
       url = 'https://api.anthropic.com/v1/messages';
     }
 
     const res=await fetch(url,{ method:'POST', headers, body:JSON.stringify(body), signal:abortCtrl.signal });
     if (!res.ok) { const err=await res.json().catch(()=>({})); throw new Error(err?.error?.message||`HTTP ${res.status}`); }
-    const data=await res.json();
 
-    let reply, thinkingText=null;
-    if (useDS || useOAI) {
-      reply = data.choices?.[0]?.message?.content || '（沒有回應）';
-      thinkingText = data.choices?.[0]?.message?.reasoning_content || null;
-    } else {
-      const thinkBlock=data.content?.find(b=>b.type==='thinking');
-      const textBlock=data.content?.find(b=>b.type==='text');
-      thinkingText=thinkBlock?.thinking||null;
-      reply=textBlock?.text||'（沒有回應）';
-    }
-
+    // 準備 UI（移除 typing 狀態，建立 streaming 用的 <p>）
     tb.querySelector('.bubble').classList.remove('typing');
-
     const _btEl = tb.querySelector('.bt');
+    _btEl.innerHTML = '<p></p>';
+    const _streamP = _btEl.querySelector('p');
+
+    let _thinkEl = null, _thinkContent = null;
+    const _setupThink = () => {
+      if (!_thinkEl) {
+        _thinkEl = document.createElement('details');
+        _thinkEl.open = true;
+        _thinkEl.className = 'thinking-block';
+        _thinkEl.innerHTML = '<summary class="thinking-summary">思考過程</summary><div class="thinking-content"></div>';
+        _thinkContent = _thinkEl.querySelector('.thinking-content');
+        tb.querySelector('.msg-col').insertBefore(_thinkEl, tb.querySelector('.bubble'));
+      }
+    };
+
+    const { reply, thinkingText } = await doStream(res, useDS, useOAI,
+      (chunk) => { _setupThink(); _thinkContent.textContent += chunk; scrollBot(); },
+      (chunk) => { _streamP.textContent += chunk; scrollBot(); }
+    );
+
+    if (_thinkEl) _thinkEl.open = false;
     renderBt(_btEl, reply);
+
     const _bbl = tb.querySelector('.bubble');
     if (_bbl && !_bbl.querySelector('.msg-time')) {
       const _twNow = new Date().toLocaleTimeString('zh-TW', {timeZone:'Asia/Taipei', hour:'2-digit', minute:'2-digit', hour12:false});
       const _tEl = document.createElement('span'); _tEl.className='msg-time'; _tEl.textContent=_twNow;
       _bbl.appendChild(_tEl);
-    }
-    if (thinkingText) {
-      const thinkEl=document.createElement('details');
-      thinkEl.className='thinking-block';
-      thinkEl.innerHTML=`<summary class="thinking-summary">思考過程</summary><div class="thinking-content">${escHtml(thinkingText)}</div>`;
-      tb.querySelector('.msg-col').insertBefore(thinkEl,tb.querySelector('.bubble'));
     }
     conv.history.push({role:'assistant',content:thinkingText?[{type:'thinking',thinking:thinkingText},{type:'text',text:reply}]:reply});
     const newIdx=conv.history.length-1;
@@ -1300,7 +1306,10 @@ async function regenerateFrom(historyIdx) {
   renderMessages();
 
   isLoading=true;
-  document.getElementById('send-btn').disabled=true;
+  abortCtrl=new AbortController();
+  document.getElementById('send-btn').disabled=false;
+  document.getElementById('send-icon').style.display='none';
+  document.getElementById('stop-icon').style.display='';
   const tb=addBubble('assistant','正在輸入…',true,null,null,-1);
 
   try {
@@ -1350,6 +1359,7 @@ async function regenerateFrom(historyIdx) {
       if (sys) oaiMessages.unshift({role:'system',content:sys});
       body={model,max_tokens:2048,messages:oaiMessages};
       if (useOAI && searchEnabled) body.tools=[{type:'web_search_preview'}];
+      body.stream=true;
       headers={'Content-Type':'application/json','Authorization':`Bearer ${key}`};
       url=useDS?'https://api.deepseek.com/chat/completions':'https://api.openai.com/v1/chat/completions';
     } else {
@@ -1357,39 +1367,44 @@ async function regenerateFrom(historyIdx) {
       if (sys) body.system=[{type:'text',text:sys,cache_control:{type:'ephemeral'}}];
       if (thinkingEnabled) body.thinking={type:'enabled',budget_tokens:10000};
       if (searchEnabled) body.tools=[{type:'web_search_20250305',name:'web_search'}];
+      body.stream=true;
       headers={'Content-Type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'};
       url='https://api.anthropic.com/v1/messages';
     }
 
-    const res=await fetch(url,{method:'POST',headers,body:JSON.stringify(body)});
+    const res=await fetch(url,{method:'POST',headers,body:JSON.stringify(body),signal:abortCtrl.signal});
     if (!res.ok) { const err=await res.json().catch(()=>({})); throw new Error(err?.error?.message||`HTTP ${res.status}`); }
-    const data=await res.json();
-
-    let reply, thinkingText=null;
-    if (useDS||useOAI) {
-      reply=data.choices?.[0]?.message?.content||'（沒有回應）';
-      thinkingText=data.choices?.[0]?.message?.reasoning_content||null;
-    } else {
-      const thinkBlock=data.content?.find(b=>b.type==='thinking');
-      const textBlock=data.content?.find(b=>b.type==='text');
-      thinkingText=thinkBlock?.thinking||null;
-      reply=textBlock?.text||'（沒有回應）';
-    }
 
     tb.querySelector('.bubble').classList.remove('typing');
-
     const _btEl = tb.querySelector('.bt');
+    _btEl.innerHTML = '<p></p>';
+    const _streamP = _btEl.querySelector('p');
+
+    let _thinkEl = null, _thinkContent = null;
+    const _setupThink = () => {
+      if (!_thinkEl) {
+        _thinkEl = document.createElement('details');
+        _thinkEl.open = true;
+        _thinkEl.className = 'thinking-block';
+        _thinkEl.innerHTML = '<summary class="thinking-summary">思考過程</summary><div class="thinking-content"></div>';
+        _thinkContent = _thinkEl.querySelector('.thinking-content');
+        tb.querySelector('.msg-col').insertBefore(_thinkEl, tb.querySelector('.bubble'));
+      }
+    };
+
+    const { reply, thinkingText } = await doStream(res, useDS, useOAI,
+      (chunk) => { _setupThink(); _thinkContent.textContent += chunk; scrollBot(); },
+      (chunk) => { _streamP.textContent += chunk; scrollBot(); }
+    );
+
+    if (_thinkEl) _thinkEl.open = false;
     renderBt(_btEl, reply);
+
     const _bbl = tb.querySelector('.bubble');
     if (_bbl && !_bbl.querySelector('.msg-time')) {
       const _twNow = new Date().toLocaleTimeString('zh-TW', {timeZone:'Asia/Taipei', hour:'2-digit', minute:'2-digit', hour12:false});
       const _tEl = document.createElement('span'); _tEl.className='msg-time'; _tEl.textContent=_twNow;
       _bbl.appendChild(_tEl);
-    }
-    if (thinkingText) {
-      const thinkEl=document.createElement('details'); thinkEl.className='thinking-block';
-      thinkEl.innerHTML=`<summary class="thinking-summary">思考過程</summary><div class="thinking-content">${escHtml(thinkingText)}</div>`;
-      tb.querySelector('.msg-col').insertBefore(thinkEl,tb.querySelector('.bubble'));
     }
     const assistantContent=thinkingText?[{type:'thinking',thinking:thinkingText},{type:'text',text:reply}]:reply;
     conv.history.push({role:'assistant',content:assistantContent});
@@ -1406,10 +1421,13 @@ async function regenerateFrom(historyIdx) {
     await maybeCompress();
   } catch(e) {
     tb.querySelector('.bubble').classList.remove('typing');
-    tb.querySelector('.bt').textContent='⚠ 錯誤：'+e.message;
+    if (e.name==='AbortError') { tb.remove(); }
+    else { tb.querySelector('.bt').textContent='⚠ 錯誤：'+e.message; }
   }
 
-  isLoading=false;
+  isLoading=false; abortCtrl=null;
+  document.getElementById('send-icon').style.display='';
+  document.getElementById('stop-icon').style.display='none';
   document.getElementById('send-btn').disabled=false;
   ui.focus(); scrollBot();
 }
@@ -1419,6 +1437,42 @@ function addNotice(text) {
   document.getElementById('messages').appendChild(el);
 }
 function scrollBot() { const m=document.getElementById('messages'); m.scrollTop=m.scrollHeight; }
+async function doStream(res, useDS, useOAI, onThink, onReply) {
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '', reply = '', thinking = '';
+  let claudeBlockType = null;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const lines = buf.split('\n');
+    buf = lines.pop();
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      const raw = line.slice(6).trim();
+      if (raw === '[DONE]') continue;
+      try {
+        const d = JSON.parse(raw);
+        if (useDS || useOAI) {
+          const delta = d.choices?.[0]?.delta;
+          if (delta?.reasoning_content) { thinking += delta.reasoning_content; onThink(delta.reasoning_content); }
+          if (delta?.content) { reply += delta.content; onReply(delta.content); }
+        } else {
+          if (d.type === 'content_block_start') claudeBlockType = d.content_block?.type;
+          else if (d.type === 'content_block_delta') {
+            if (d.delta?.type === 'thinking_delta') { thinking += d.delta.thinking; onThink(d.delta.thinking); }
+            else if (d.delta?.type === 'text_delta') { reply += d.delta.text; onReply(d.delta.text); }
+          }
+        }
+      } catch(e) {}
+    }
+  }
+  return { reply: reply || '（沒有回應）', thinkingText: thinking || null };
+}
+
+
 function escHtml(t) { return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
 // ── Settings ──
