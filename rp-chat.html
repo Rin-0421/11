@@ -581,6 +581,19 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
   </div>
 </div>
 
+<!-- 摘要編輯 Modal -->
+<div id="summary-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:200;align-items:center;justify-content:center;padding:20px">
+  <div class="modal-sheet">
+    <div class="modal-title">✦ 對話摘要</div>
+    <div class="modal-sub">可直接編輯摘要，確認後存入；取消則以原始版本存入。</div>
+    <textarea id="summary-edit" style="width:100%;min-height:200px;background:var(--bg);border:1px solid var(--border);border-radius:9px;padding:10px;color:var(--text);font-size:13px;line-height:1.6;resize:vertical;font-family:inherit"></textarea>
+    <div class="modal-btns" style="margin-top:12px">
+      <button class="modal-cancel" id="summary-cancel">取消（原始版本）</button>
+      <button class="modal-confirm" id="summary-confirm">確認存入</button>
+    </div>
+  </div>
+</div>
+
 <!-- 官端對話選擇 Modal -->
 <div id="claude-import-modal">
   <div class="modal-sheet">
@@ -948,14 +961,26 @@ async function maybeCompress() {
       : data.content?.[0]?.text || '';
     if (!summary) return;
 
-    conv.history = [
-      { _notice: `✦ 對話已自動壓縮（${useDS ? 'DeepSeek Pro' : 'Haiku'}），保留最近 10 則完整紀錄` },
-      { role: 'user', content: `[以下是之前對話的摘要]\n${summary}\n[摘要結束，以下繼續正常對話]` },
-      ...toKeep
-    ];
-    save(); renderConvList();
-    document.getElementById('messages').innerHTML = '';
-    renderMessages();
+    // 顯示摘要編輯 modal
+    const modal = document.getElementById('summary-modal');
+    const ta = document.getElementById('summary-edit');
+    ta.value = summary;
+    modal.style.display = 'flex';
+
+    function applyCompression(finalSummary) {
+      modal.style.display = 'none';
+      conv.history = [
+        { _notice: `✦ 對話已自動壓縮（${useDS ? 'DeepSeek Pro' : 'Haiku'}），保留最近 10 則完整紀錄` },
+        { role: 'user', content: `[以下是之前對話的摘要]\n${finalSummary}\n[摘要結束，以下繼續正常對話]` },
+        ...toKeep
+      ];
+      save(); renderConvList();
+      document.getElementById('messages').innerHTML = '';
+      renderMessages();
+    }
+
+    document.getElementById('summary-confirm').onclick = () => applyCompression(ta.value.trim() || summary);
+    document.getElementById('summary-cancel').onclick = () => applyCompression(summary);
   } catch(e) { console.error('compress failed', e); }
 }
 
