@@ -292,6 +292,9 @@ body {
 .bt { display: block; }
 .bt p { margin: 0; white-space: pre-wrap; word-break: break-word; }
 .bt p + p { margin-top: 0.75em; }
+.msg-time { font-size: 10px; color: var(--text-dim); opacity: 0.6; margin-top: 5px; display: block; }
+.msg-row.user .msg-time { text-align: left; }
+.msg-row.assistant .msg-time { text-align: right; }
 .msg-img { max-width: 180px; max-height: 180px; border-radius: 10px; display: block; margin-bottom: 5px; }
 .pdf-badge {
   display: inline-flex; align-items: center; gap: 5px;
@@ -1070,6 +1073,21 @@ async function send() {
     const key = getKey(model);
     if (!key) throw new Error(useDS ? '請先填入 DeepSeek API 金鑰' : useOAI ? '請先填入 OpenAI API 金鑰' : '請先填入 Anthropic API 金鑰');
 
+    // 在最後一則 user message 注入當前台灣時間（只進 API，不影響 UI 和 history）
+    const _apiTwTime = new Date().toLocaleTimeString('zh-TW', {timeZone:'Asia/Taipei', hour:'2-digit', minute:'2-digit', hour12:false});
+    const _lastUserIdx = apiMessages.map(m=>m.role).lastIndexOf('user');
+    if (_lastUserIdx >= 0) {
+      const _um = apiMessages[_lastUserIdx];
+      const _tp = `[當前台灣時間：${_apiTwTime}]\n`;
+      if (typeof _um.content === 'string') {
+        apiMessages[_lastUserIdx] = { ..._um, content: _tp + _um.content };
+      } else if (Array.isArray(_um.content)) {
+        const _nc = _um.content.map(b => b.type==='text' ? {...b, text: _tp + b.text} : b);
+        if (!_nc.some(b=>b.type==='text')) _nc.unshift({type:'text', text: _tp});
+        apiMessages[_lastUserIdx] = { ..._um, content: _nc };
+      }
+    }
+
     let body, headers, url;
 
     if (useDS || useOAI) {
@@ -1180,7 +1198,13 @@ function addBubble(role,text,typing,extra,thinkingText,historyIdx) {
   const sp=document.createElement('span'); sp.className='bt';
   const _esc=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   sp.innerHTML=text.split(/\n\n+/).map(p=>'<p>'+_esc(p).replace(/\n/g,'<br>')+'</p>').join('');
-  bbl.appendChild(sp); col.appendChild(bbl);
+  bbl.appendChild(sp);
+  if (!typing) {
+    const _twNow = new Date().toLocaleTimeString('zh-TW', {timeZone:'Asia/Taipei', hour:'2-digit', minute:'2-digit', hour12:false});
+    const _timeEl = document.createElement('span'); _timeEl.className='msg-time'; _timeEl.textContent=_twNow;
+    bbl.appendChild(_timeEl);
+  }
+  col.appendChild(bbl);
 
   // Action buttons
   if (!typing && historyIdx >= 0) {
@@ -1257,6 +1281,21 @@ async function regenerateFrom(historyIdx) {
     const useOAI=isOpenAI(model);
     const key=getKey(model);
     if (!key) throw new Error(useDS?'請先填入 DeepSeek API 金鑰':useOAI?'請先填入 OpenAI API 金鑰':'請先填入 Anthropic API 金鑰');
+
+    // 在最後一則 user message 注入當前台灣時間（只進 API，不影響 UI 和 history）
+    const _apiTwTime = new Date().toLocaleTimeString('zh-TW', {timeZone:'Asia/Taipei', hour:'2-digit', minute:'2-digit', hour12:false});
+    const _lastUserIdx = apiMessages.map(m=>m.role).lastIndexOf('user');
+    if (_lastUserIdx >= 0) {
+      const _um = apiMessages[_lastUserIdx];
+      const _tp = `[當前台灣時間：${_apiTwTime}]\n`;
+      if (typeof _um.content === 'string') {
+        apiMessages[_lastUserIdx] = { ..._um, content: _tp + _um.content };
+      } else if (Array.isArray(_um.content)) {
+        const _nc = _um.content.map(b => b.type==='text' ? {...b, text: _tp + b.text} : b);
+        if (!_nc.some(b=>b.type==='text')) _nc.unshift({type:'text', text: _tp});
+        apiMessages[_lastUserIdx] = { ..._um, content: _nc };
+      }
+    }
 
     let body, headers, url;
     if (useDS || useOAI) {
