@@ -948,11 +948,11 @@ function renderMessages() {
           : {type:'pdf', name:'PDF 文件'});
         if (!extra.length) extra=null;
       }
-      addBubble('user',text,false,extra,null,i);
+      addBubble('user',text,false,extra,null,i,msg._time);
     } else {
       const textB=Array.isArray(msg.content)?msg.content.find(b=>b.type==='text')?.text||'':typeof msg.content==='string'?msg.content:'';
       const thinkB=Array.isArray(msg.content)?msg.content.find(b=>b.type==='thinking')?.thinking||null:null;
-      addBubble('assistant',textB,false,null,thinkB,i);
+      addBubble('assistant',textB,false,null,thinkB,i,msg._time);
     }
   }
   scrollBot();
@@ -1109,9 +1109,10 @@ async function send() {
     pendingFiles=[]; document.getElementById('file-preview').style.display='none'; document.getElementById('file-preview').innerHTML='';
   } else { content=text; }
 
-  conv.history.push({role:'user',content});
+  const userTime = nowTW();
+  conv.history.push({role:'user',content,_time:userTime});
   const userIdx=conv.history.length-1;
-  addBubble('user',text,false,extra,null,userIdx);
+  addBubble('user',text,false,extra,null,userIdx,userTime);
   const tb=addBubble('assistant','正在輸入…',true,null,null,-1);
 
   try {
@@ -1120,9 +1121,9 @@ async function send() {
     const apiMessages=conv.history.filter(m=>!m._notice).map(m=>{
       if (Array.isArray(m.content)) {
         const filtered = m.content.filter(b=>b.type!=='thinking');
-        return { ...m, content: filtered.length===1&&filtered[0].type==='text' ? filtered[0].text : filtered };
+        return { role: m.role, content: filtered.length===1&&filtered[0].type==='text' ? filtered[0].text : filtered };
       }
-      return m;
+      return { role: m.role, content: m.content };
     });
 
     const useDS = isDeepSeek(model);
@@ -1210,12 +1211,12 @@ async function send() {
     renderBt(_btEl, reply);
 
     const _bbl = tb.querySelector('.bubble');
+    const _asstTime = nowTW();
     if (_bbl && !_bbl.querySelector('.msg-time')) {
-      const _twNow = new Date().toLocaleTimeString('zh-TW', {timeZone:'Asia/Taipei', hour:'2-digit', minute:'2-digit', hour12:false});
-      const _tEl = document.createElement('span'); _tEl.className='msg-time'; _tEl.textContent=_twNow;
+      const _tEl = document.createElement('span'); _tEl.className='msg-time'; _tEl.textContent=_asstTime;
       _bbl.appendChild(_tEl);
     }
-    conv.history.push({role:'assistant',content:thinkingText?[{type:'thinking',thinking:thinkingText},{type:'text',text:reply}]:reply});
+    conv.history.push({role:'assistant',content:thinkingText?[{type:'thinking',thinking:thinkingText},{type:'text',text:reply}]:reply,_time:_asstTime});
     const newIdx=conv.history.length-1;
     const actions=document.createElement('div'); actions.className='bubble-actions show';
     const copyBtnS=document.createElement('button'); copyBtnS.className='action-btn'; copyBtnS.textContent='複製';
@@ -1245,11 +1246,12 @@ async function send() {
 }
 
 // ── Bubble ──
+function nowTW() { return new Date().toLocaleTimeString('zh-TW', {timeZone:'Asia/Taipei', hour:'2-digit', minute:'2-digit', hour12:false}); }
 function renderBt(el, text) {
   const _esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   el.innerHTML = text.split(/\n\n+/).map(p => '<p>' + _esc(p).replace(/\n/g,'<br>') + '</p>').join('');
 }
-function addBubble(role,text,typing,extra,thinkingText,historyIdx) {
+function addBubble(role,text,typing,extra,thinkingText,historyIdx,msgTime) {
   const msgs=document.getElementById('messages');
   const row=document.createElement('div');
   row.className=`msg-row ${role}`;
@@ -1279,9 +1281,9 @@ function addBubble(role,text,typing,extra,thinkingText,historyIdx) {
   if (!typing) renderBt(sp, text);
   bbl.appendChild(sp);
   if (!typing) {
-    const _twNow = new Date().toLocaleTimeString('zh-TW', {timeZone:'Asia/Taipei', hour:'2-digit', minute:'2-digit', hour12:false});
-    const _timeEl = document.createElement('span'); _timeEl.className='msg-time'; _timeEl.textContent=_twNow;
-    bbl.appendChild(_timeEl);
+    const _tEl = document.createElement('span'); _tEl.className='msg-time';
+    _tEl.textContent = msgTime || nowTW();
+    bbl.appendChild(_tEl);
   }
   col.appendChild(bbl);
 
@@ -1362,9 +1364,9 @@ async function regenerateFrom(historyIdx) {
     const apiMessages=conv.history.filter(m=>!m._notice).map(m=>{
       if (Array.isArray(m.content)) {
         const filtered=m.content.filter(b=>b.type!=='thinking');
-        return {...m,content:filtered.length===1&&filtered[0].type==='text'?filtered[0].text:filtered};
+        return {role:m.role,content:filtered.length===1&&filtered[0].type==='text'?filtered[0].text:filtered};
       }
-      return m;
+      return {role:m.role,content:m.content};
     });
 
     const useDS=isDeepSeek(model);
@@ -1445,13 +1447,13 @@ async function regenerateFrom(historyIdx) {
     renderBt(_btEl, reply);
 
     const _bbl = tb.querySelector('.bubble');
+    const _asstTime = nowTW();
     if (_bbl && !_bbl.querySelector('.msg-time')) {
-      const _twNow = new Date().toLocaleTimeString('zh-TW', {timeZone:'Asia/Taipei', hour:'2-digit', minute:'2-digit', hour12:false});
-      const _tEl = document.createElement('span'); _tEl.className='msg-time'; _tEl.textContent=_twNow;
+      const _tEl = document.createElement('span'); _tEl.className='msg-time'; _tEl.textContent=_asstTime;
       _bbl.appendChild(_tEl);
     }
     const assistantContent=thinkingText?[{type:'thinking',thinking:thinkingText},{type:'text',text:reply}]:reply;
-    conv.history.push({role:'assistant',content:assistantContent});
+    conv.history.push({role:'assistant',content:assistantContent,_time:_asstTime});
     const newIdx=conv.history.length-1;
     const actions=document.createElement('div'); actions.className='bubble-actions show';
     const copyBtnS=document.createElement('button'); copyBtnS.className='action-btn'; copyBtnS.textContent='複製';
