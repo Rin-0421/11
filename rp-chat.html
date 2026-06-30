@@ -296,6 +296,8 @@ body {
 .msg-row.user .msg-time { text-align: left; }
 .msg-row.assistant .msg-time { text-align: right; }
 .msg-img { max-width: 180px; max-height: 180px; border-radius: 10px; display: block; margin-bottom: 5px; }
+.msg-img-grid { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 5px; }
+.msg-img-grid .msg-img { margin-bottom: 0; max-width: 110px; max-height: 110px; }
 .pdf-badge {
   display: inline-flex; align-items: center; gap: 5px;
   background: var(--surface2); border: 1px solid var(--border);
@@ -337,11 +339,12 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
 
 /* Input */
 .input-area { padding: 9px 13px 15px; background: var(--surface); border-top: 1px solid var(--border); flex-shrink: 0; }
-#file-preview { display: none; align-items: center; gap: 8px; margin-bottom: 7px; background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 7px 10px; }
-#file-preview img { width: 32px; height: 32px; object-fit: cover; border-radius: 5px; }
-.fp-icon { font-size: 22px; }
-.fp-name { flex: 1; font-size: 12px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fp-rm { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 15px; transition: color .15s; }
+#file-preview { display: none; flex-wrap: wrap; gap: 6px; margin-bottom: 7px; }
+.fp-item { display: flex; align-items: center; gap: 6px; background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 5px 8px; max-width: 160px; }
+.fp-item img { width: 28px; height: 28px; object-fit: cover; border-radius: 5px; flex-shrink: 0; }
+.fp-icon { font-size: 18px; flex-shrink: 0; }
+.fp-name { font-size: 11px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fp-rm { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 14px; flex-shrink: 0; transition: color .15s; }
 .fp-rm:hover { color: var(--danger); }
 .input-row { display: flex; gap: 7px; align-items: flex-end; }
 #user-input {
@@ -525,15 +528,10 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
   <div id="messages"></div>
 
   <div class="input-area">
-    <div id="file-preview">
-      <img id="fp-img" style="display:none">
-      <span class="fp-icon" id="fp-icon" style="display:none">📄</span>
-      <span class="fp-name" id="fp-name"></span>
-      <button class="fp-rm" id="fp-rm">✕</button>
-    </div>
+    <div id="file-preview"></div>
     <div class="input-row">
       <button class="attach-btn" id="attach-btn">📎</button>
-      <input type="file" id="file-input" accept="image/*,.pdf" style="display:none">
+      <input type="file" id="file-input" accept="image/*,.pdf" multiple style="display:none">
       <textarea id="user-input" placeholder="輸入訊息…" rows="1"></textarea>
       <button class="send-btn" id="send-btn">
         <svg id="send-icon" viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
@@ -621,7 +619,7 @@ let thinkingEnabled = false;
 let searchEnabled = false;
 let conversations = []; // [{ id, name, history }]
 let currentConvId = null;
-let pendingFile = null, isLoading = false, abortCtrl = null;
+let pendingFiles = [], isLoading = false, abortCtrl = null;
 
 const COMPRESS_THRESHOLD = 40;
 const KEEP_RECENT = 10;
@@ -642,42 +640,82 @@ function getApiUrl(model) {
   return 'https://api.anthropic.com/v1/messages';
 }
 
-// ── Load ──
-try {
-  const s = JSON.parse(localStorage.getItem(SK) || 'null');
-  if (s && s.apiKey) {
-    apiKey = s.apiKey || '';
-    dsKey = s.dsKey || '';
-    oaiKey = s.oaiKey || '';
-    charName = s.charName || '';
-    avatarB64 = s.avatarB64 || '';
-    docs = s.docs || [];
-    instText = s.instText || '';
-    thinkingEnabled = s.thinkingEnabled || false;
-    searchEnabled = s.searchEnabled || false;
-    conversations = s.conversations || [];
-    currentConvId = s.currentConvId || null;
-    document.getElementById('chat-model').value = s.model || 'claude-sonnet-4-6';
-    // Ensure at least one conversation
-    if (!conversations.length) conversations.push({ id: uid(), name: '對話 1', history: [] });
-    if (!currentConvId || !conversations.find(c=>c.id===currentConvId))
-      currentConvId = conversations[0].id;
-    updateThinkBtn();
-    showChat();
-    renderConvList();
-    renderMessages();
-  }
-} catch(e){}
+// ── IndexedDB 工具 ──
+const IDB_NAME = 'rp_chat_db', IDB_STORE = 'kv', IDB_VER = 1;
+function idbOpen() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(IDB_NAME, IDB_VER);
+    req.onupgradeneeded = () => { if (!req.result.objectStoreNames.contains(IDB_STORE)) req.result.createObjectStore(IDB_STORE); };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function idbGet(key) {
+  const db = await idbOpen();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readonly');
+    const req = tx.objectStore(IDB_STORE).get(key);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function idbSet(key, value) {
+  const db = await idbOpen();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readwrite');
+    tx.objectStore(IDB_STORE).put(value, key);
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+// ── Load（含舊版 localStorage 資料自動搬遷）──
+async function loadState() {
+  try {
+    let s = await idbGet(SK);
+    if (!s) {
+      // 嘗試從舊版 localStorage 搬遷
+      const old = localStorage.getItem(SK);
+      if (old) {
+        s = JSON.parse(old);
+        await idbSet(SK, s);
+        localStorage.removeItem(SK);
+      }
+    }
+    if (s && s.apiKey) {
+      apiKey = s.apiKey || '';
+      dsKey = s.dsKey || '';
+      oaiKey = s.oaiKey || '';
+      charName = s.charName || '';
+      avatarB64 = s.avatarB64 || '';
+      docs = s.docs || [];
+      instText = s.instText || '';
+      thinkingEnabled = s.thinkingEnabled || false;
+      searchEnabled = s.searchEnabled || false;
+      conversations = s.conversations || [];
+      currentConvId = s.currentConvId || null;
+      document.getElementById('chat-model').value = s.model || 'claude-sonnet-4-6';
+      if (!conversations.length) conversations.push({ id: uid(), name: '對話 1', history: [] });
+      if (!currentConvId || !conversations.find(c=>c.id===currentConvId))
+        currentConvId = conversations[0].id;
+      updateThinkBtn();
+      showChat();
+      renderConvList();
+      renderMessages();
+    }
+  } catch(e) { console.error('load failed', e); }
+}
+loadState();
 
 // ── Save ──
-function save() {
+async function save() {
   try {
-    localStorage.setItem(SK, JSON.stringify({
+    await idbSet(SK, {
       apiKey, dsKey, oaiKey, charName, avatarB64, docs, instText, thinkingEnabled, searchEnabled,
       conversations, currentConvId,
       model: document.getElementById('chat-model').value
-    }));
-  } catch(e){ alert('儲存失敗'); }
+    });
+  } catch(e){ console.error('save failed', e); alert('儲存失敗'); }
 }
 
 // ── Avatar ──
@@ -904,10 +942,11 @@ function renderMessages() {
         : msg.content.filter(b=>b.type==='text').map(b=>b.text).join('');
       let extra=null;
       if (Array.isArray(msg.content)) {
-        const ib=msg.content.find(b=>b.type==='image');
-        const db=msg.content.find(b=>b.type==='document');
-        if (ib) extra={type:'image',src:`data:${ib.source.media_type};base64,${ib.source.data}`};
-        else if (db) extra={type:'pdf',name:'PDF 文件'};
+        const files = msg.content.filter(b=>b.type==='image'||b.type==='document');
+        extra = files.map(b => b.type==='image'
+          ? {type:'image', src:`data:${b.source.media_type};base64,${b.source.data}`}
+          : {type:'pdf', name:'PDF 文件'});
+        if (!extra.length) extra=null;
       }
       addBubble('user',text,false,extra,null,i);
     } else {
@@ -993,21 +1032,34 @@ async function maybeCompress() {
 // ── File ──
 document.getElementById('attach-btn').addEventListener('click', ()=>document.getElementById('file-input').click());
 document.getElementById('file-input').addEventListener('change', e => {
-  const f=e.target.files[0]; if(!f) return; e.target.value='';
-  const isPdf=f.type==='application/pdf', isImg=f.type.startsWith('image/');
-  if(!isPdf&&!isImg) return;
-  toB64(f).then(b64=>{
-    pendingFile={type:isPdf?'pdf':'image',mime:f.type,data:b64.split(',')[1],src:b64,name:f.name};
+  const files=Array.from(e.target.files); e.target.value='';
+  if(!files.length) return;
+  Promise.all(files.map(f=>{
+    const isPdf=f.type==='application/pdf', isImg=f.type.startsWith('image/');
+    if(!isPdf&&!isImg) return null;
+    return toB64(f).then(b64=>({type:isPdf?'pdf':'image',mime:f.type,data:b64.split(',')[1],src:b64,name:f.name}));
+  })).then(results=>{
+    results.filter(Boolean).forEach(pf=>pendingFiles.push(pf));
     showFP();
   });
 });
 function showFP() {
-  document.getElementById('file-preview').style.display='flex';
-  document.getElementById('fp-name').textContent=pendingFile.name;
-  if (pendingFile.type==='image') { document.getElementById('fp-img').src=pendingFile.src; document.getElementById('fp-img').style.display='block'; document.getElementById('fp-icon').style.display='none'; }
-  else { document.getElementById('fp-img').style.display='none'; document.getElementById('fp-icon').style.display='block'; }
+  const wrap=document.getElementById('file-preview');
+  wrap.innerHTML='';
+  if (!pendingFiles.length) { wrap.style.display='none'; return; }
+  wrap.style.display='flex';
+  pendingFiles.forEach((pf,idx)=>{
+    const item=document.createElement('div'); item.className='fp-item';
+    if (pf.type==='image') { const img=document.createElement('img'); img.src=pf.src; item.appendChild(img); }
+    else { const icon=document.createElement('span'); icon.className='fp-icon'; icon.textContent='📄'; item.appendChild(icon); }
+    const name=document.createElement('span'); name.className='fp-name'; name.textContent=pf.name;
+    item.appendChild(name);
+    const rm=document.createElement('button'); rm.className='fp-rm'; rm.textContent='✕';
+    rm.addEventListener('click', ()=>{ pendingFiles.splice(idx,1); showFP(); });
+    item.appendChild(rm);
+    wrap.appendChild(item);
+  });
 }
-document.getElementById('fp-rm').addEventListener('click', ()=>{ pendingFile=null; document.getElementById('file-preview').style.display='none'; });
 
 // ── Input ──
 const ui = document.getElementById('user-input');
@@ -1037,7 +1089,7 @@ async function send() {
   const conv = currentConv();
   if (!conv) return;
   const text = ui.value.trim();
-  if ((!text&&!pendingFile)||isLoading) return;
+  if ((!text&&!pendingFiles.length)||isLoading) return;
   isLoading=true;
   abortCtrl = new AbortController();
   document.getElementById('send-btn').disabled=false;
@@ -1046,12 +1098,15 @@ async function send() {
   ui.value=''; ui.style.height='auto';
 
   let content, extra=null;
-  if (pendingFile) {
+  if (pendingFiles.length) {
     content=[];
-    if (pendingFile.type==='image') { content.push({type:'image',source:{type:'base64',media_type:pendingFile.mime,data:pendingFile.data}}); extra={type:'image',src:pendingFile.src}; }
-    else { content.push({type:'document',source:{type:'base64',media_type:pendingFile.mime,data:pendingFile.data}}); extra={type:'pdf',name:pendingFile.name}; }
+    extra=[];
+    pendingFiles.forEach(pf=>{
+      if (pf.type==='image') { content.push({type:'image',source:{type:'base64',media_type:pf.mime,data:pf.data}}); extra.push({type:'image',src:pf.src}); }
+      else { content.push({type:'document',source:{type:'base64',media_type:pf.mime,data:pf.data}}); extra.push({type:'pdf',name:pf.name}); }
+    });
     if (text) content.push({type:'text',text});
-    pendingFile=null; document.getElementById('file-preview').style.display='none';
+    pendingFiles=[]; document.getElementById('file-preview').style.display='none'; document.getElementById('file-preview').innerHTML='';
   } else { content=text; }
 
   conv.history.push({role:'user',content});
@@ -1170,15 +1225,6 @@ async function send() {
     regenBtn.addEventListener('click', ()=>regenerateFrom(newIdx));
     actions.appendChild(regenBtn);
     tb.querySelector('.msg-col').appendChild(actions);
-    // 清除 user message 裡的圖片/PDF base64，節省 localStorage 空間
-    const userMsg = conv.history[userIdx];
-    if (Array.isArray(userMsg?.content)) {
-      userMsg.content = userMsg.content.map(b => {
-        if (b.type === 'image') return { type: 'text', text: '[圖片]' };
-        if (b.type === 'document') return { type: 'text', text: '[PDF 文件]' };
-        return b;
-      });
-    }
     save(); renderConvList();
     await maybeCompress();
   } catch(e) {
@@ -1221,8 +1267,13 @@ function addBubble(role,text,typing,extra,thinkingText,historyIdx) {
   }
   const bbl=document.createElement('div'); bbl.className='bubble'+(typing?' typing':'');
   if (extra) {
-    if (extra.type==='image') { const img=document.createElement('img'); img.src=extra.src; img.className='msg-img'; bbl.appendChild(img); }
-    else if (extra.type==='pdf') { const bd=document.createElement('div'); bd.className='pdf-badge'; bd.innerHTML=`📄 ${extra.name}`; bbl.appendChild(bd); }
+    const extras = Array.isArray(extra) ? extra : [extra];
+    if (extras.some(x=>x.type==='image')) {
+      const grid=document.createElement('div'); grid.className='msg-img-grid';
+      extras.filter(x=>x.type==='image').forEach(x=>{ const img=document.createElement('img'); img.src=x.src; img.className='msg-img'; grid.appendChild(img); });
+      bbl.appendChild(grid);
+    }
+    extras.filter(x=>x.type==='pdf').forEach(x=>{ const bd=document.createElement('div'); bd.className='pdf-badge'; bd.innerHTML=`📄 ${x.name}`; bbl.appendChild(bd); });
   }
   const sp=document.createElement('span'); sp.className='bt';
   if (!typing) renderBt(sp, text);
