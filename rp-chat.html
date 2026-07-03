@@ -588,12 +588,28 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
 <!-- 摘要編輯 Modal -->
 <div id="summary-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:200;align-items:center;justify-content:center;padding:20px">
   <div class="modal-sheet">
-    <div class="modal-title">✦ 對話摘要</div>
-    <div class="modal-sub">可直接編輯摘要，確認後存入；取消則以原始版本存入。</div>
-    <textarea id="summary-edit" style="width:100%;min-height:200px;background:var(--bg);border:1px solid var(--border);border-radius:9px;padding:10px;color:var(--text);font-size:13px;line-height:1.6;resize:vertical;font-family:inherit"></textarea>
-    <div class="modal-btns" style="margin-top:12px">
-      <button class="modal-cancel" id="summary-cancel">取消（原始版本）</button>
-      <button class="modal-confirm" id="summary-confirm">確認存入</button>
+    <!-- 步驟一：選模型 -->
+    <div id="summary-step-select">
+      <div class="modal-title">✦ 壓縮摘要</div>
+      <div class="modal-sub">選擇要用哪個模型來寫摘要。</div>
+      <select id="summary-model-select" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:9px;padding:10px;color:var(--text);font-size:13px;margin-bottom:12px"></select>
+      <div class="modal-btns">
+        <button class="modal-confirm" id="summary-gen-btn">生成摘要</button>
+      </div>
+    </div>
+    <!-- 步驟二：生成中 -->
+    <div id="summary-step-loading" style="display:none;text-align:center;padding:20px 0">
+      <div style="color:var(--text-dim);font-size:14px">⏳ 生成摘要中…</div>
+    </div>
+    <!-- 步驟三：編輯 -->
+    <div id="summary-step-edit" style="display:none">
+      <div class="modal-title">✦ 編輯摘要</div>
+      <div class="modal-sub">可直接編輯摘要，確認後存入；取消則以原始版本存入。</div>
+      <textarea id="summary-edit" style="width:100%;min-height:200px;background:var(--bg);border:1px solid var(--border);border-radius:9px;padding:10px;color:var(--text);font-size:13px;line-height:1.6;resize:vertical;font-family:inherit"></textarea>
+      <div class="modal-btns" style="margin-top:12px">
+        <button class="modal-cancel" id="summary-cancel">取消（原始版本）</button>
+        <button class="modal-confirm" id="summary-confirm">確認存入</button>
+      </div>
     </div>
   </div>
 </div>
@@ -971,62 +987,90 @@ async function maybeCompress() {
     content: typeof m.content==='string'?m.content:Array.isArray(m.content)?m.content.filter(b=>b.type==='text').map(b=>b.text).join(''):''
   }));
 
-  // 優先用 DS Pro 壓縮（便宜又好），沒有 DS key 則用 Haiku
-  const useDS = !!dsKey;
-  try {
-    let res;
-    if (useDS) {
-      const dsMessages = [
-        { role: 'system', content: '你的任務是將以下對話整理成簡潔摘要，保留重要劇情、角色情感狀態和關鍵細節，用第三人稱描述，繁體中文。' },
-        ...summaryHistory,
-        { role: 'user', content: '請將以上對話整理成摘要。' }
-      ];
-      res = await fetch('https://api.deepseek.com/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${dsKey}` },
-        body: JSON.stringify({ model: 'deepseek-v4-pro', max_tokens: 1024, messages: dsMessages })
-      });
-    } else {
-      res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-        body: JSON.stringify({
-          model: 'claude-haiku-4-5-20251001',
-          max_tokens: 1024,
-          system: '你的任務是將以下對話整理成簡潔摘要，保留重要劇情、角色情感狀態和關鍵細節，用第三人稱描述，繁體中文。',
-          messages: [...summaryHistory, { role: 'user', content: '請將以上對話整理成摘要。' }]
-        })
-      });
-    }
+  // 建立可用模型選項
+  const modal = document.getElementById('summary-modal');
+  const sel = document.getElementById('summary-model-select');
+  sel.innerHTML = '';
+  if (dsKey) sel.add(new Option('DS V4 Pro（推薦）', 'ds-pro'));
+  if (apiKey) { sel.add(new Option('Haiku 4.5', 'haiku')); sel.add(new Option('Sonnet 4.6', 'sonnet')); }
+  if (oaiKey) sel.add(new Option('GPT-4o 5月版', 'gpt4o'));
+  if (!sel.options.length) { console.error('no key available for compression'); return; }
 
-    if (!res.ok) return;
-    const data = await res.json();
-    const summary = useDS
-      ? data.choices?.[0]?.message?.content || ''
-      : data.content?.[0]?.text || '';
-    if (!summary) return;
+  // 顯示步驟一（選模型）
+  document.getElementById('summary-step-select').style.display = '';
+  document.getElementById('summary-step-loading').style.display = 'none';
+  document.getElementById('summary-step-edit').style.display = 'none';
+  modal.style.display = 'flex';
 
-    // 顯示摘要編輯 modal
-    const modal = document.getElementById('summary-modal');
-    const ta = document.getElementById('summary-edit');
-    ta.value = summary;
-    modal.style.display = 'flex';
+  const COMPRESS_PROMPT = '你的任務是將以下對話整理成簡潔摘要，保留重要劇情、角色情感狀態和關鍵細節，用第三人稱描述，繁體中文。';
 
-    function applyCompression(finalSummary) {
-      modal.style.display = 'none';
-      conv.history = [
-        { _notice: `✦ 對話已自動壓縮（${useDS ? 'DeepSeek Pro' : 'Haiku'}），保留最近 10 則完整紀錄` },
-        { role: 'user', content: `[以下是之前對話的摘要]\n${finalSummary}\n[摘要結束，以下繼續正常對話]` },
-        ...toKeep
-      ];
-      save(); renderConvList();
-      document.getElementById('messages').innerHTML = '';
-      renderMessages();
-    }
+  document.getElementById('summary-gen-btn').onclick = async () => {
+    const chosen = sel.value;
+    document.getElementById('summary-step-select').style.display = 'none';
+    document.getElementById('summary-step-loading').style.display = '';
 
-    document.getElementById('summary-confirm').onclick = () => applyCompression(ta.value.trim() || summary);
-    document.getElementById('summary-cancel').onclick = () => applyCompression(summary);
-  } catch(e) { console.error('compress failed', e); }
+    try {
+      let res, summary = '', modelLabel = chosen;
+      if (chosen === 'ds-pro') {
+        modelLabel = 'DeepSeek Pro';
+        res = await fetch('https://api.deepseek.com/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${dsKey}` },
+          body: JSON.stringify({ model: 'deepseek-v4-pro', max_tokens: 1024, messages: [
+            { role: 'system', content: COMPRESS_PROMPT },
+            ...summaryHistory,
+            { role: 'user', content: '請將以上對話整理成摘要。' }
+          ]})
+        });
+        const d = await res.json(); summary = d.choices?.[0]?.message?.content || '';
+      } else if (chosen === 'haiku' || chosen === 'sonnet') {
+        const m = chosen === 'haiku' ? 'claude-haiku-4-5-20251001' : 'claude-sonnet-4-6';
+        modelLabel = chosen === 'haiku' ? 'Haiku 4.5' : 'Sonnet 4.6';
+        res = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+          body: JSON.stringify({ model: m, max_tokens: 1024, system: COMPRESS_PROMPT, messages: [...summaryHistory, { role: 'user', content: '請將以上對話整理成摘要。' }] })
+        });
+        const d = await res.json(); summary = d.content?.[0]?.text || '';
+      } else if (chosen === 'gpt4o') {
+        modelLabel = 'GPT-4o';
+        res = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${oaiKey}` },
+          body: JSON.stringify({ model: 'gpt-4o-2024-05-13', max_tokens: 1024, messages: [
+            { role: 'system', content: COMPRESS_PROMPT },
+            ...summaryHistory,
+            { role: 'user', content: '請將以上對話整理成摘要。' }
+          ]})
+        });
+        const d = await res.json(); summary = d.choices?.[0]?.message?.content || '';
+      }
+
+      if (!summary) { modal.style.display = 'none'; return; }
+
+      // 進入步驟三（編輯）
+      document.getElementById('summary-step-loading').style.display = 'none';
+      document.getElementById('summary-step-edit').style.display = '';
+      const ta = document.getElementById('summary-edit');
+      ta.value = summary;
+
+      function applyCompression(finalSummary) {
+        modal.style.display = 'none';
+        conv.history = [
+          { _notice: `✦ 對話已自動壓縮（${modelLabel}），保留最近 10 則完整紀錄` },
+          { role: 'user', content: `[以下是之前對話的摘要]\n${finalSummary}\n[摘要結束，以下繼續正常對話]` },
+          ...toKeep
+        ];
+        save(); renderConvList();
+        document.getElementById('messages').innerHTML = '';
+        renderMessages();
+      }
+
+      document.getElementById('summary-confirm').onclick = () => applyCompression(ta.value.trim() || summary);
+      document.getElementById('summary-cancel').onclick = () => applyCompression(summary);
+
+    } catch(e) { console.error('compress failed', e); modal.style.display = 'none'; }
+  };
 }
 
 // ── File ──
