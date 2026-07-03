@@ -1132,7 +1132,7 @@ async function send() {
     if (!key) throw new Error(useDS ? '請先填入 DeepSeek API 金鑰' : useOAI ? '請先填入 OpenAI API 金鑰' : '請先填入 Anthropic API 金鑰');
 
     // 在最後一則 user message 注入當前台灣時間（只進 API，不影響 UI 和 history）
-    const _apiTwTime = new Date().toLocaleTimeString('zh-TW', {timeZone:'Asia/Taipei', hour:'2-digit', minute:'2-digit', hour12:false});
+    const _apiTwTime = new Date().toLocaleString('zh-TW', {timeZone:'Asia/Taipei', year:'numeric', month:'long', day:'numeric', weekday:'short', hour:'2-digit', minute:'2-digit', hour12:false});
     const _lastUserIdx = apiMessages.map(m=>m.role).lastIndexOf('user');
     if (_lastUserIdx >= 0) {
       const _um = apiMessages[_lastUserIdx];
@@ -1246,7 +1246,7 @@ async function send() {
 }
 
 // ── Bubble ──
-function nowTW() { return new Date().toLocaleTimeString('zh-TW', {timeZone:'Asia/Taipei', hour:'2-digit', minute:'2-digit', hour12:false}); }
+function nowTW() { return new Date().toLocaleString('zh-TW', {timeZone:'Asia/Taipei', year:'numeric', month:'long', day:'numeric', weekday:'short', hour:'2-digit', minute:'2-digit', hour12:false}); }
 function renderBt(el, text) {
   const _esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   el.innerHTML = text.split(/\n\n+/).map(p => '<p>' + _esc(p).replace(/\n/g,'<br>') + '</p>').join('');
@@ -1375,7 +1375,7 @@ async function regenerateFrom(historyIdx) {
     if (!key) throw new Error(useDS?'請先填入 DeepSeek API 金鑰':useOAI?'請先填入 OpenAI API 金鑰':'請先填入 Anthropic API 金鑰');
 
     // 在最後一則 user message 注入當前台灣時間（只進 API，不影響 UI 和 history）
-    const _apiTwTime = new Date().toLocaleTimeString('zh-TW', {timeZone:'Asia/Taipei', hour:'2-digit', minute:'2-digit', hour12:false});
+    const _apiTwTime = new Date().toLocaleString('zh-TW', {timeZone:'Asia/Taipei', year:'numeric', month:'long', day:'numeric', weekday:'short', hour:'2-digit', minute:'2-digit', hour12:false});
     const _lastUserIdx = apiMessages.map(m=>m.role).lastIndexOf('user');
     if (_lastUserIdx >= 0) {
       const _um = apiMessages[_lastUserIdx];
