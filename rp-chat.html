@@ -181,6 +181,12 @@ body {
 .nav-btn svg { width: 20px; height: 20px; }
 .nav-btn .nav-label { font-size: 10px; }
 
+/* 通知窗口時隱藏輸入區 */
+body.notif-view .input-area { display: none; }
+body.notif-view .chat-header .think-toggle,
+body.notif-view .chat-header #search-toggle,
+body.notif-view .chat-header .hdr-select { display: none; }
+
 /* 行事曆 */
 .cal-day-hdr { font-size: 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: .06em; margin: 14px 4px 8px; }
 .cal-day-hdr:first-child { margin-top: 4px; }
@@ -488,6 +494,12 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
       <div class="sidebar-title">✦ RP Chat</div>
       <button class="new-conv-btn" id="new-conv-btn">＋ 新增對話</button>
     </div>
+    <div id="notif-entry" class="conv-item" style="margin: 0 8px 8px; border-radius: 8px; padding: 10px 12px; cursor: pointer; border-bottom: 1px solid var(--border);">
+      <div class="conv-name-wrap">
+        <div class="conv-name" style="pointer-events:none">📢 通知</div>
+        <div class="conv-count" id="notif-count">0 則</div>
+      </div>
+    </div>
     <div class="conv-list" id="conv-list"></div>
     <div class="sidebar-footer">
       <button class="sidebar-footer-btn" id="sb-settings-btn">⚙ 角色與設定</button>
@@ -563,6 +575,16 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
         <input type="checkbox" id="pg-gcal-inject" style="width:44px;height:24px;cursor:pointer">
       </label>
       <button class="btn-sm" id="pg-gcal-disconnect" style="width:100%;margin-top:8px;display:none">中斷連接</button>
+    </div>
+    <div class="card" style="max-width:none">
+      <div class="card-title">行事曆通知</div>
+      <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer">
+        <span style="font-size:14px">開啟事件提醒</span>
+        <input type="checkbox" id="pg-notif-toggle" style="width:44px;height:24px;cursor:pointer">
+      </label>
+      <div style="font-size:11px;color:var(--text-dim);margin-top:10px;line-height:1.5">
+        開啟後，每小時 45 分會檢查一次行事曆。若未來 60 分鐘內有事件，就由 AI 用角色風格生成一則提醒。使用 DS V4 Pro 生成，不會記入對話歷史。
+      </div>
     </div>
     <div class="card" style="max-width:none">
       <div class="card-title">API 金鑰</div>
@@ -759,8 +781,10 @@ let conversations = []; // [{ id, name, history }]
 let currentConvId = null;
 let pendingFiles = [], isLoading = false, abortCtrl = null, darkMode = false;
 let gcalClientId = '', gcalToken = null, gcalTokenExpiry = 0, gcalInject = false, gcalEvents = [], gcalTokenClient = null;
+let notifications = [], notifEnabled = false, notifLeadMin = 10, notifCheckTimer = null, notifiedIds = new Set();
+const NOTIF_VIEW_ID = '__notifications__';
 
-const COMPRESS_THRESHOLD = 40;
+const COMPRESS_THRESHOLD = 50;
 const KEEP_RECENT = 10;
 
 // ── Helpers ──
@@ -834,6 +858,10 @@ async function loadState() {
       darkMode = !!s.darkMode;
       gcalClientId = s.gcalClientId || '';
       gcalInject = !!s.gcalInject;
+      notifications = Array.isArray(s.notifications) ? s.notifications : [];
+      notifEnabled = !!s.notifEnabled;
+      notifLeadMin = typeof s.notifLeadMin === 'number' ? s.notifLeadMin : 10;
+      notifiedIds = new Set(s.notifiedIds || []);
       applyDarkMode();
       conversations = s.conversations || [];
       currentConvId = s.currentConvId || null;
@@ -847,6 +875,7 @@ async function loadState() {
     initHome();
     renderConvList();
     renderMessages();
+    if (notifEnabled) startNotifTimer();
   } catch(e) { console.error('load failed', e); }
 }
 loadState();
@@ -954,7 +983,9 @@ document.getElementById('set-add-doc-btn').addEventListener('click', ()=>addDoc(
 document.getElementById('pg-add-doc-btn').addEventListener('click', ()=>addDoc('pg-new-doc-name','pg-new-doc-content'));
 
 function initHome() {
-  document.getElementById('hdr-name').textContent=charName||'角色';
+  updateNotifCount();
+  updateNotifViewClass();
+  document.getElementById('hdr-name').textContent = isInNotifView() ? '📢 通知' : (charName || '角色');
   setAv('hdr-av-img','hdr-av-ph',avatarB64);
   updateThinkBtn();
   updateSearchBtn();
@@ -1042,6 +1073,7 @@ async function fetchGcalEvents() {
     const data = await res.json();
     gcalEvents = data.items || [];
     renderGcalPage();
+    checkAndNotify();
   } catch(e) { console.error('gcal fetch error', e); }
 }
 
@@ -1099,6 +1131,144 @@ function buildGcalContext() {
   return `[今日行程]\n${lines}\n[行程結束]`;
 }
 
+// ── 通知系統 ──
+function updateNotifCount() {
+  const el = document.getElementById('notif-count');
+  if (el) el.textContent = `${notifications.length} 則`;
+}
+
+function isInNotifView() {
+  return currentConvId === NOTIF_VIEW_ID;
+}
+function updateNotifViewClass() {
+  document.body.classList.toggle('notif-view', isInNotifView());
+  if (isInNotifView()) {
+    const nm = document.getElementById('hdr-name');
+    if (nm) nm.textContent = '📢 通知';
+  } else {
+    const nm = document.getElementById('hdr-name');
+    if (nm) nm.textContent = charName || '角色';
+  }
+}
+
+function switchToNotifView() {
+  currentConvId = NOTIF_VIEW_ID;
+  save(); renderConvList(); renderMessages(); updateNotifViewClass();
+  closeSidebar();
+}
+
+async function generateReminder(event) {
+  const eventTime = event.start.dateTime || event.start.date;
+  const isAllDay = !!event.start.date;
+  const timeStr = isAllDay ? '全天' : new Date(event.start.dateTime).toLocaleTimeString('zh-TW', {timeZone:'Asia/Taipei', hour:'2-digit', minute:'2-digit', hour12:false});
+  const title = event.summary || '未命名事件';
+  const location = event.location ? `（地點：${event.location}）` : '';
+  const userPrompt = `${notifLeadMin} 分鐘後有事件即將開始：\n- 時間：${timeStr}\n- 事項：${title}${location}\n\n請以角色身份，用 30-100 字的簡短適中提醒訊息通知用戶。只需告知、不要提問、不要引導對話。`;
+
+  const sys = buildSystem();
+  try {
+    const res = await fetch('https://api.deepseek.com/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${dsKey}` },
+      body: JSON.stringify({
+        model: 'deepseek-v4-pro',
+        max_tokens: 300,
+        messages: [
+          ...(sys ? [{role:'system', content:sys}] : []),
+          { role: 'user', content: userPrompt }
+        ]
+      })
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.choices?.[0]?.message?.content || null;
+  } catch(e) { console.error('reminder gen failed', e); return null; }
+}
+
+function pushNotification(text, meta) {
+  const notif = {
+    id: Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+    text,
+    _time: nowTW(),
+    meta: meta || null
+  };
+  notifications.push(notif);
+  // 40 則上限，超過保留最近 10 則
+  if (notifications.length > 40) {
+    notifications.splice(0, notifications.length - 10);
+  }
+  updateNotifCount();
+  save();
+  // 若正在通知窗口就 append
+  if (isInNotifView()) renderMessages();
+  // 系統通知
+  if ('Notification' in window && Notification.permission === 'granted') {
+    try {
+      new Notification(charName || '提醒', { body: text.slice(0, 120), icon: avatarB64 || undefined });
+    } catch(e) {}
+  }
+}
+
+async function checkAndNotify() {
+  if (!notifEnabled || !gcalEvents.length || !dsKey) return;
+  const now = Date.now();
+  const windowMs = 60 * 60 * 1000; // 檢查未來 60 分鐘
+  for (const ev of gcalEvents) {
+    if (!ev.start.dateTime) continue; // 全天事件不處理
+    const eventTs = new Date(ev.start.dateTime).getTime();
+    // 觸發條件：事件在未來 60 分鐘內，且尚未通知過
+    if (eventTs > now && eventTs - now <= windowMs && !notifiedIds.has(ev.id)) {
+      notifiedIds.add(ev.id);
+      save();
+      const text = await generateReminder(ev);
+      if (text) pushNotification(text, { eventId: ev.id, eventTitle: ev.summary });
+    }
+  }
+  // 清理很舊的 notifiedIds（超過 24 小時前的事件）
+  const cutoff = now - 24 * 60 * 60 * 1000;
+  const stillValid = new Set();
+  gcalEvents.forEach(ev => {
+    if (ev.start.dateTime && new Date(ev.start.dateTime).getTime() > cutoff && notifiedIds.has(ev.id)) {
+      stillValid.add(ev.id);
+    }
+  });
+  notifiedIds = stillValid;
+}
+
+function startNotifTimer() {
+  if (notifCheckTimer) { clearTimeout(notifCheckTimer); notifCheckTimer = null; }
+  if (!notifEnabled) return;
+  // 立刻檢查一次
+  checkAndNotify();
+  // 排程到下一個 XX:45
+  function scheduleNext() {
+    const now = new Date();
+    const next = new Date(now);
+    if (now.getMinutes() >= 45) {
+      next.setHours(now.getHours() + 1);
+    }
+    next.setMinutes(45);
+    next.setSeconds(0);
+    next.setMilliseconds(0);
+    const delay = next.getTime() - now.getTime();
+    notifCheckTimer = setTimeout(() => {
+      checkAndNotify();
+      scheduleNext();
+    }, delay);
+  }
+  scheduleNext();
+}
+
+function stopNotifTimer() {
+  if (notifCheckTimer) { clearTimeout(notifCheckTimer); notifCheckTimer = null; }
+}
+
+function requestNotifPermission() {
+  if ('Notification' in window && Notification.permission === 'default') {
+    Notification.requestPermission();
+  }
+}
+
 function applyDarkMode() {
   document.body.classList.toggle('dark', darkMode);
   const meta = document.getElementById('theme-color-meta');
@@ -1110,6 +1280,7 @@ function fillSettingsPage() {
   document.getElementById('pg-gcal-cid').value = gcalClientId || '';
   document.getElementById('pg-gcal-inject').checked = gcalInject;
   document.getElementById('pg-gcal-disconnect').style.display = gcalToken ? 'block' : 'none';
+  document.getElementById('pg-notif-toggle').checked = notifEnabled;
   document.getElementById('pg-claude-key').value = apiKey || '';
   document.getElementById('pg-ds-key').value = dsKey || '';
   document.getElementById('pg-oai-key').value = oaiKey || '';
@@ -1143,6 +1314,13 @@ document.getElementById('pg-gcal-disconnect').addEventListener('click', ()=>{
   if (confirm('中斷 Google 行事曆連接？')) gcalDisconnect();
 });
 document.getElementById('cal-connect-btn').addEventListener('click', gcalConnect);
+document.getElementById('pg-notif-toggle').addEventListener('change', e=>{
+  notifEnabled = e.target.checked;
+  save();
+  if (notifEnabled) { requestNotifPermission(); startNotifTimer(); }
+  else stopNotifTimer();
+});
+
 document.getElementById('cal-refresh-btn').addEventListener('click', ()=>{
   ensureGcalToken().then(ok => { if (ok) fetchGcalEvents(); });
 });
@@ -1205,6 +1383,10 @@ document.getElementById('pg-clear-btn').addEventListener('click', ()=>{
 function renderConvList() {
   const list = document.getElementById('conv-list');
   list.innerHTML='';
+  // 通知項目高亮
+  const nEntry = document.getElementById('notif-entry');
+  if (nEntry) nEntry.classList.toggle('active', isInNotifView());
+  updateNotifCount();
   conversations.forEach(conv => {
     const item = document.createElement('div');
     item.className='conv-item'+(conv.id===currentConvId?' active':'');
@@ -1250,6 +1432,7 @@ function renderConvList() {
 
 function switchConv(id) {
   currentConvId=id;
+  updateNotifViewClass();
   save(); renderConvList(); renderMessages();
   closeSidebar();
 }
@@ -1264,6 +1447,7 @@ function closeSidebar() {
   document.getElementById('sidebar-overlay').classList.remove('open');
 }
 document.getElementById('sidebar-btn').addEventListener('click', openSidebar);
+document.getElementById('notif-entry').addEventListener('click', switchToNotifView);
 document.getElementById('sidebar-overlay').addEventListener('click', closeSidebar);
 
 document.getElementById('new-conv-btn').addEventListener('click', () => {
@@ -1292,32 +1476,57 @@ document.getElementById('import-file').addEventListener('change', e => {
 
 // ── Render messages ──
 function renderMessages() {
-  const conv = currentConv();
   const el = document.getElementById('messages');
   el.innerHTML='';
-  if (!conv) return;
-  for (let i=0; i<conv.history.length; i++) {
-    const msg=conv.history[i];
-    if (msg._notice) { addNotice(msg._notice); continue; }
-    if (msg.role==='user') {
-      const text = typeof msg.content==='string' ? msg.content
-        : msg.content.filter(b=>b.type==='text').map(b=>b.text).join('');
-      let extra=null;
-      if (Array.isArray(msg.content)) {
-        const files = msg.content.filter(b=>b.type==='image'||b.type==='document');
-        extra = files.map(b => b.type==='image'
-          ? {type:'image', src:`data:${b.source.media_type};base64,${b.source.data}`}
-          : {type:'pdf', name:'PDF 文件'});
-        if (!extra.length) extra=null;
-      }
-      addBubble('user',text,false,extra,null,i,msg._time);
+  // 通知窗口特殊模式
+  if (isInNotifView()) {
+    if (!notifications.length) {
+      addNotice('目前沒有通知');
     } else {
-      const textB=Array.isArray(msg.content)?msg.content.find(b=>b.type==='text')?.text||'':typeof msg.content==='string'?msg.content:'';
-      const thinkB=Array.isArray(msg.content)?msg.content.find(b=>b.type==='thinking')?.thinking||null:null;
-      addBubble('assistant',textB,false,null,thinkB,i,msg._time);
+      notifications.forEach((n, i) => {
+        addBubble('assistant', n.text, false, null, null, -1000 - i, n._time);
+      });
     }
+    scrollBot();
+    return;
+  }
+  const conv = currentConv();
+  if (!conv) return;
+  // 先渲染 archive（歷史備份，模型看不到但使用者看得到）
+  const archiveList = Array.isArray(conv.archive) ? conv.archive : [];
+  if (archiveList.length) {
+    addNotice(`↑ 以下 ${archiveList.length} 則是壓縮前的歷史紀錄（模型已看不到）↑`);
+    for (let i=0; i<archiveList.length; i++) {
+      renderOneMessage(archiveList[i], -1 - i); // 用負 idx 標記為 archive（不可編輯）
+    }
+    addNotice(`↓ 以下是模型仍能看到的內容 ↓`);
+  }
+  // 再渲染主 history
+  for (let i=0; i<conv.history.length; i++) {
+    renderOneMessage(conv.history[i], i);
   }
   scrollBot();
+}
+
+function renderOneMessage(msg, i) {
+  if (msg._notice) { addNotice(msg._notice); return; }
+  if (msg.role==='user') {
+    const text = typeof msg.content==='string' ? msg.content
+      : msg.content.filter(b=>b.type==='text').map(b=>b.text).join('');
+    let extra=null;
+    if (Array.isArray(msg.content)) {
+      const files = msg.content.filter(b=>b.type==='image'||b.type==='document');
+      extra = files.map(b => b.type==='image'
+        ? {type:'image', src:`data:${b.source.media_type};base64,${b.source.data}`}
+        : {type:'pdf', name:'PDF 文件'});
+      if (!extra.length) extra=null;
+    }
+    addBubble('user',text,false,extra,null,i,msg._time);
+  } else {
+    const textB=Array.isArray(msg.content)?msg.content.find(b=>b.type==='text')?.text||'':typeof msg.content==='string'?msg.content:'';
+    const thinkB=Array.isArray(msg.content)?msg.content.find(b=>b.type==='thinking')?.thinking||null:null;
+    addBubble('assistant',textB,false,null,thinkB,i,msg._time);
+  }
 }
 
 // ── Auto compress ──
@@ -1402,6 +1611,12 @@ async function maybeCompress() {
 
       function applyCompression(finalSummary) {
         modal.style.display = 'none';
+        // 封存邏輯：push 前若 archive 已有內容，先刪掉最舊的 40 則
+        if (!Array.isArray(conv.archive)) conv.archive = [];
+        if (conv.archive.length > 0) {
+          conv.archive.splice(0, 40);
+        }
+        conv.archive.push(...toCompress);
         conv.history = [
           { _notice: `✦ 對話已自動壓縮（${modelLabel}），保留最近 10 則完整紀錄` },
           { role: 'user', content: `[以下是之前對話的摘要]\n${finalSummary}\n[摘要結束，以下繼續正常對話]` },
