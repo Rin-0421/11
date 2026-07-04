@@ -876,6 +876,17 @@ async function loadState() {
     renderConvList();
     renderMessages();
     if (notifEnabled) startNotifTimer();
+    // 自動嘗試靜默續期 Google Calendar token
+    if (gcalClientId) {
+      const tryAutoConnect = () => {
+        if (window.google?.accounts?.oauth2) {
+          if (initGcalClient()) ensureGcalToken().then(ok => { if (ok) fetchGcalEvents(); });
+        } else {
+          setTimeout(tryAutoConnect, 500);
+        }
+      };
+      setTimeout(tryAutoConnect, 500);
+    }
   } catch(e) { console.error('load failed', e); }
 }
 loadState();
@@ -885,6 +896,8 @@ async function save() {
   try {
     await idbSet(SK, {
       apiKey, dsKey, oaiKey, charName, avatarB64, docs, instText, thinkingEnabled, searchEnabled,
+      darkMode, gcalClientId, gcalInject,
+      notifications, notifEnabled, notifLeadMin, notifiedIds: Array.from(notifiedIds),
       conversations, currentConvId,
       model: document.getElementById('chat-model').value
     });
