@@ -1081,7 +1081,8 @@ document.getElementById('file-input').addEventListener('change', e => {
   Promise.all(files.map(f=>{
     const isPdf=f.type==='application/pdf', isImg=f.type.startsWith('image/');
     if(!isPdf&&!isImg) return null;
-    return toB64(f).then(b64=>({type:isPdf?'pdf':'image',mime:f.type,data:b64.split(',')[1],src:b64,name:f.name}));
+    const b64promise = isImg ? compressImage(f) : toB64(f);
+    return b64promise.then(b64=>({type:isPdf?'pdf':'image',mime:isPdf?f.type:'image/jpeg',data:b64.split(',')[1],src:b64,name:f.name}));
   })).then(results=>{
     results.filter(Boolean).forEach(pf=>pendingFiles.push(pf));
     showFP();
@@ -1756,6 +1757,30 @@ document.getElementById('clear-btn').addEventListener('click', ()=>{
 // ── Util ──
 function toB64(file) {
   return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=()=>rej(new Error('read failed')); r.readAsDataURL(file); });
+}
+
+function compressImage(file, maxSize=1024, quality=0.82) {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      let w = img.naturalWidth, h = img.naturalHeight;
+      if (w <= maxSize && h <= maxSize) {
+        // 不需要壓縮，直接轉 b64
+        toB64(file).then(resolve);
+        return;
+      }
+      if (w > h) { h = Math.round(h * maxSize / w); w = maxSize; }
+      else { w = Math.round(w * maxSize / h); h = maxSize; }
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      resolve(canvas.toDataURL('image/jpeg', quality));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); toB64(file).then(resolve); };
+    img.src = url;
+  });
 }
 </script>
 </body>
