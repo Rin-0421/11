@@ -19,6 +19,8 @@
   document.currentScript.after(l);
 })();
 </script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="https://apis.google.com/js/api.js" async defer></script>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
@@ -178,6 +180,15 @@ body {
 .nav-btn.active { color: var(--accent); border-top-color: var(--accent); }
 .nav-btn svg { width: 20px; height: 20px; }
 .nav-btn .nav-label { font-size: 10px; }
+
+/* 行事曆 */
+.cal-day-hdr { font-size: 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: .06em; margin: 14px 4px 8px; }
+.cal-day-hdr:first-child { margin-top: 4px; }
+.cal-event { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin-bottom: 6px; display: flex; gap: 10px; align-items: flex-start; }
+.cal-event-time { font-size: 12px; color: var(--accent); font-weight: 600; flex-shrink: 0; min-width: 66px; padding-top: 1px; }
+.cal-event-body { flex: 1; min-width: 0; }
+.cal-event-title { font-size: 14px; color: var(--text); word-break: break-word; }
+.cal-event-loc { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
 
 /* 頁面容器 */
 .page { flex: 1; display: none; flex-direction: column; overflow: hidden; position: relative; }
@@ -544,6 +555,16 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
       </label>
     </div>
     <div class="card" style="max-width:none">
+      <div class="card-title">Google 行事曆</div>
+      <label class="lbl">OAuth 用戶端 ID</label>
+      <input class="finput" type="text" id="pg-gcal-cid" placeholder="xxxxx.apps.googleusercontent.com" autocomplete="off" spellcheck="false">
+      <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;margin-top:4px">
+        <span style="font-size:13px">送訊息時附上今日行程</span>
+        <input type="checkbox" id="pg-gcal-inject" style="width:44px;height:24px;cursor:pointer">
+      </label>
+      <button class="btn-sm" id="pg-gcal-disconnect" style="width:100%;margin-top:8px;display:none">中斷連接</button>
+    </div>
+    <div class="card" style="max-width:none">
       <div class="card-title">API 金鑰</div>
       <label class="lbl">Anthropic（Claude）</label>
       <input class="finput" type="password" id="pg-claude-key" placeholder="sk-ant-api03-…" autocomplete="off">
@@ -596,11 +617,19 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
 
 <!-- 行事曆頁 -->
 <div id="page-calendar" class="page" data-page="calendar">
-  <div class="page-hdr">行事曆</div>
-  <div class="page-body" style="display:flex;align-items:center;justify-content:center;color:var(--text-dim);text-align:center;flex-direction:column;gap:8px">
-    <div style="font-size:36px;opacity:0.4">📅</div>
-    <div style="font-size:14px">開發中</div>
-    <div style="font-size:12px;opacity:0.7">行事曆功能還沒設計好</div>
+  <div class="page-hdr" style="display:flex;justify-content:space-between;align-items:center">
+    <span>行事曆</span>
+    <button class="btn-sm" id="cal-refresh-btn" style="display:none">↻ 重新整理</button>
+  </div>
+  <div class="page-body" id="cal-body">
+    <div id="cal-empty" style="display:flex;align-items:center;justify-content:center;color:var(--text-dim);text-align:center;flex-direction:column;gap:12px;height:100%;padding:20px">
+      <div style="font-size:36px;opacity:0.4">📅</div>
+      <div style="font-size:14px">還沒連接 Google 行事曆</div>
+      <div style="font-size:12px;opacity:0.7;max-width:280px">連接後可以在這裡查看你的行程，並讓 AI 知道你今天有什麼安排</div>
+      <button class="btn-primary" id="cal-connect-btn" style="max-width:200px;margin-top:8px">連接 Google 行事曆</button>
+      <div style="font-size:11px;opacity:0.6;margin-top:4px">需先在設定頁填入 OAuth 用戶端 ID</div>
+    </div>
+    <div id="cal-events" style="display:none"></div>
   </div>
 </div>
 
@@ -729,6 +758,7 @@ let searchEnabled = false;
 let conversations = []; // [{ id, name, history }]
 let currentConvId = null;
 let pendingFiles = [], isLoading = false, abortCtrl = null, darkMode = false;
+let gcalClientId = '', gcalToken = null, gcalTokenExpiry = 0, gcalInject = false, gcalEvents = [], gcalTokenClient = null;
 
 const COMPRESS_THRESHOLD = 40;
 const KEEP_RECENT = 10;
@@ -802,6 +832,8 @@ async function loadState() {
       thinkingEnabled = s.thinkingEnabled || false;
       searchEnabled = s.searchEnabled || false;
       darkMode = !!s.darkMode;
+      gcalClientId = s.gcalClientId || '';
+      gcalInject = !!s.gcalInject;
       applyDarkMode();
       conversations = s.conversations || [];
       currentConvId = s.currentConvId || null;
@@ -935,12 +967,138 @@ function switchPage(target) {
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.target===target));
   if (target==='settings') fillSettingsPage();
   if (target==='home') initHome();
+  if (target==='calendar') {
+    renderGcalPage();
+    if (gcalToken && Date.now() >= gcalTokenExpiry) ensureGcalToken().then(ok => { if (ok) fetchGcalEvents(); });
+    else if (gcalToken) fetchGcalEvents();
+  }
 }
 document.querySelectorAll('.nav-btn').forEach(btn => {
   btn.addEventListener('click', () => switchPage(btn.dataset.target));
 });
 
 // ── 設定頁：載入資料到欄位 ──
+// ── Google Calendar ──
+function initGcalClient() {
+  if (!gcalClientId || !window.google?.accounts?.oauth2) return false;
+  if (gcalTokenClient) return true;
+  try {
+    gcalTokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: gcalClientId,
+      scope: 'https://www.googleapis.com/auth/calendar.readonly',
+      callback: (resp) => {
+        if (resp.access_token) {
+          gcalToken = resp.access_token;
+          gcalTokenExpiry = Date.now() + (resp.expires_in || 3600) * 1000 - 60000;
+          fetchGcalEvents();
+        } else if (resp.error) {
+          alert('連接失敗：' + resp.error);
+        }
+      }
+    });
+    return true;
+  } catch(e) { console.error('gcal init failed', e); return false; }
+}
+
+function gcalConnect() {
+  if (!gcalClientId) { alert('請先在設定頁填入 OAuth 用戶端 ID'); switchPage('settings'); return; }
+  if (!initGcalClient()) { alert('Google 服務尚未載入，請稍後再試'); return; }
+  gcalTokenClient.requestAccessToken({ prompt: 'consent' });
+}
+
+function gcalDisconnect() {
+  if (gcalToken && window.google?.accounts?.oauth2) {
+    google.accounts.oauth2.revoke(gcalToken, ()=>{});
+  }
+  gcalToken = null; gcalTokenExpiry = 0; gcalEvents = [];
+  renderGcalPage();
+  const btn = document.getElementById('pg-gcal-disconnect');
+  if (btn) btn.style.display = 'none';
+}
+
+async function ensureGcalToken() {
+  if (gcalToken && Date.now() < gcalTokenExpiry) return true;
+  if (!gcalClientId) return false;
+  if (!initGcalClient()) return false;
+  return new Promise((resolve) => {
+    const origCb = gcalTokenClient.callback;
+    gcalTokenClient.callback = (resp) => {
+      origCb(resp);
+      resolve(!!resp.access_token);
+    };
+    gcalTokenClient.requestAccessToken({ prompt: '' });
+  });
+}
+
+async function fetchGcalEvents() {
+  if (!gcalToken) return;
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 7).toISOString();
+  const url = `https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${encodeURIComponent(start)}&timeMax=${encodeURIComponent(end)}&singleEvents=true&orderBy=startTime&maxResults=50`;
+  try {
+    const res = await fetch(url, { headers: { 'Authorization': `Bearer ${gcalToken}` } });
+    if (!res.ok) { console.error('gcal fetch failed', res.status); return; }
+    const data = await res.json();
+    gcalEvents = data.items || [];
+    renderGcalPage();
+  } catch(e) { console.error('gcal fetch error', e); }
+}
+
+function renderGcalPage() {
+  const empty = document.getElementById('cal-empty');
+  const list = document.getElementById('cal-events');
+  const refresh = document.getElementById('cal-refresh-btn');
+  if (!empty || !list) return;
+  if (!gcalToken) {
+    empty.style.display = 'flex';
+    list.style.display = 'none';
+    refresh.style.display = 'none';
+    return;
+  }
+  empty.style.display = 'none';
+  list.style.display = 'block';
+  refresh.style.display = 'inline-block';
+  if (!gcalEvents.length) {
+    list.innerHTML = '<div style="text-align:center;color:var(--text-dim);padding:40px 20px;font-size:13px">未來 7 天沒有行程</div>';
+    return;
+  }
+  const groups = {};
+  gcalEvents.forEach(ev => {
+    const d = ev.start.dateTime || ev.start.date;
+    const key = d.slice(0, 10);
+    (groups[key] = groups[key] || []).push(ev);
+  });
+  const html = Object.keys(groups).sort().map(dateKey => {
+    const dt = new Date(dateKey + 'T00:00:00');
+    const label = dt.toLocaleDateString('zh-TW', { month: 'long', day: 'numeric', weekday: 'short' });
+    const items = groups[dateKey].map(ev => {
+      const isAllDay = !!ev.start.date;
+      const timeStr = isAllDay ? '全天' : new Date(ev.start.dateTime).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false });
+      return `<div class="cal-event"><div class="cal-event-time">${timeStr}</div><div class="cal-event-body"><div class="cal-event-title">${escHtml(ev.summary || '（無標題）')}</div>${ev.location ? `<div class="cal-event-loc">📍 ${escHtml(ev.location)}</div>` : ''}</div></div>`;
+    }).join('');
+    return `<div class="cal-day-hdr">${label}</div>${items}`;
+  }).join('');
+  list.innerHTML = html;
+}
+
+function buildGcalContext() {
+  // 給 API 用的今日行程摘要
+  if (!gcalInject || !gcalEvents.length) return '';
+  const today = new Date().toISOString().slice(0, 10);
+  const todayEvents = gcalEvents.filter(ev => {
+    const d = ev.start.dateTime || ev.start.date;
+    return d.slice(0, 10) === today;
+  });
+  if (!todayEvents.length) return '';
+  const lines = todayEvents.map(ev => {
+    const isAllDay = !!ev.start.date;
+    const t = isAllDay ? '全天' : new Date(ev.start.dateTime).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false });
+    return `- ${t}：${ev.summary || '（無標題）'}`;
+  }).join('\n');
+  return `[今日行程]\n${lines}\n[行程結束]`;
+}
+
 function applyDarkMode() {
   document.body.classList.toggle('dark', darkMode);
   const meta = document.getElementById('theme-color-meta');
@@ -949,6 +1107,9 @@ function applyDarkMode() {
 
 function fillSettingsPage() {
   document.getElementById('pg-dark-toggle').checked = darkMode;
+  document.getElementById('pg-gcal-cid').value = gcalClientId || '';
+  document.getElementById('pg-gcal-inject').checked = gcalInject;
+  document.getElementById('pg-gcal-disconnect').style.display = gcalToken ? 'block' : 'none';
   document.getElementById('pg-claude-key').value = apiKey || '';
   document.getElementById('pg-ds-key').value = dsKey || '';
   document.getElementById('pg-oai-key').value = oaiKey || '';
@@ -966,6 +1127,24 @@ document.getElementById('pg-dark-toggle').addEventListener('change', e=>{
   darkMode = e.target.checked;
   applyDarkMode();
   save();
+});
+
+// Google 行事曆設定綁定
+document.getElementById('pg-gcal-cid').addEventListener('change', e=>{
+  gcalClientId = e.target.value.trim();
+  gcalTokenClient = null; // 重置 client
+  save();
+});
+document.getElementById('pg-gcal-inject').addEventListener('change', e=>{
+  gcalInject = e.target.checked;
+  save();
+});
+document.getElementById('pg-gcal-disconnect').addEventListener('click', ()=>{
+  if (confirm('中斷 Google 行事曆連接？')) gcalDisconnect();
+});
+document.getElementById('cal-connect-btn').addEventListener('click', gcalConnect);
+document.getElementById('cal-refresh-btn').addEventListener('click', ()=>{
+  ensureGcalToken().then(ok => { if (ok) fetchGcalEvents(); });
 });
 
 // 設定頁：儲存
@@ -1348,7 +1527,8 @@ async function send() {
     const _lastUserIdx = apiMessages.map(m=>m.role).lastIndexOf('user');
     if (_lastUserIdx >= 0) {
       const _um = apiMessages[_lastUserIdx];
-      const _tp = `[當前台灣時間：${_apiTwTime}]\n`;
+      const _gcalCtx = buildGcalContext();
+      const _tp = `[當前台灣時間：${_apiTwTime}]${_gcalCtx ? '\n' + _gcalCtx : ''}\n`;
       if (typeof _um.content === 'string') {
         apiMessages[_lastUserIdx] = { ..._um, content: _tp + _um.content };
       } else if (Array.isArray(_um.content)) {
@@ -1585,7 +1765,8 @@ async function regenerateFrom(historyIdx) {
     const _lastUserIdx = apiMessages.map(m=>m.role).lastIndexOf('user');
     if (_lastUserIdx >= 0) {
       const _um = apiMessages[_lastUserIdx];
-      const _tp = `[當前台灣時間：${_apiTwTime}]\n`;
+      const _gcalCtx = buildGcalContext();
+      const _tp = `[當前台灣時間：${_apiTwTime}]${_gcalCtx ? '\n' + _gcalCtx : ''}\n`;
       if (typeof _um.content === 'string') {
         apiMessages[_lastUserIdx] = { ..._um, content: _tp + _um.content };
       } else if (Array.isArray(_um.content)) {
