@@ -329,6 +329,7 @@ body {
 }
 .msg-av img { width: 100%; height: 100%; object-fit: cover; }
 .msg-col { display: flex; flex-direction: column; max-width: 74%; }
+.msg-row.assistant .msg-col { max-width: 100%; width: 100%; }
 .msg-name { font-size: 11px; color: var(--text-dim); margin-bottom: 3px; padding-left: 2px; }
 .bubble {
   padding: 9px 13px; border-radius: 18px;
@@ -1466,13 +1467,7 @@ function addBubble(role,text,typing,extra,thinkingText,historyIdx,msgTime) {
   const msgs=document.getElementById('messages');
   const row=document.createElement('div');
   row.className=`msg-row ${role}`;
-  if (role==='assistant') {
-    const av=document.createElement('div'); av.className='msg-av';
-    if (avatarB64) { const i=document.createElement('img'); i.src=avatarB64; av.appendChild(i); } else av.textContent='🎭';
-    row.appendChild(av);
-  }
   const col=document.createElement('div'); col.className='msg-col';
-  if (role==='assistant') { const nm=document.createElement('div'); nm.className='msg-name'; nm.textContent=charName||'角色'; col.appendChild(nm); }
   if (thinkingText) {
     const thinkEl=document.createElement('details'); thinkEl.className='thinking-block';
     thinkEl.innerHTML=`<summary class="thinking-summary">思考過程</summary><div class="thinking-content">${escHtml(thinkingText)}</div>`;
