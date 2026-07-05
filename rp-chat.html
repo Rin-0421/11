@@ -1360,8 +1360,12 @@ async function fetchFitData() {
   if (!gcalToken) { console.log('[fit] no token'); return; }
   console.log('[fit] start fetching');
   const now = new Date();
-  const endMs = now.getTime();
-  const startMs = endMs - 5 * 24 * 60 * 60 * 1000;
+  // 用台灣時區的「今天 00:00」為基準，往前推 5 天為起點，往後到「明天 00:00」為終點
+  // 這樣今天那格 bucket 才會完整
+  const twOffset = 8 * 60 * 60 * 1000; // UTC+8
+  const nowTwMidnight = Math.floor((now.getTime() + twOffset) / 86400000) * 86400000 - twOffset;
+  const startMs = nowTwMidnight - 5 * 86400000;
+  const endMs = nowTwMidnight + 86400000; // 明天 00:00 (台灣時間)
 
   try {
     // 步數：按天聚合
