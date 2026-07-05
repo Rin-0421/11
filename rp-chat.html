@@ -1680,7 +1680,7 @@ async function generateProactiveMsg() {
   const sysParts = [];
   if (docs.length) { sysParts.push('[知識文件]'); docs.forEach(d=>sysParts.push(`## ${d.name}\n${d.content}`)); }
   if (instTextMsg) sysParts.push('[指令]\n' + instTextMsg);
-  sysParts.push('每則用戶訊息的開頭包含當前台灣時間，請以該時間為準，不得自行估算或編造時間。');
+  sysParts.push('每則用戶訊息的開頭包含當前台灣時間、行事曆、健康資訊。這些是給你參考的背景資料，你不得將這些資料原樣複述、輸出或提及在回覆中。回覆時直接扮演角色與用戶互動即可。');
   const sys = sysParts.join('\n\n');
 
   const _twNow = new Date().toLocaleString('zh-TW', {timeZone:'Asia/Taipei', year:'numeric', month:'long', day:'numeric', weekday:'short', hour:'2-digit', minute:'2-digit', hour12:false});
@@ -1960,10 +1960,203 @@ function renderMsgPage() {
       bbl.appendChild(t);
     }
     col.appendChild(bbl);
+
+    // Action buttons
+    const actions = document.createElement('div');
+    actions.className = 'bubble-actions';
+    if (m.role === 'user') {
+      const copyBtn = document.createElement('button');
+      copyBtn.className = 'action-btn'; copyBtn.textContent = '複製';
+      copyBtn.addEventListener('click', e => { e.stopPropagation(); navigator.clipboard.writeText(text).then(() => { copyBtn.textContent = '✓'; setTimeout(() => copyBtn.textContent = '複製', 1200); }); });
+      actions.appendChild(copyBtn);
+      const editBtn = document.createElement('button');
+      editBtn.className = 'action-btn'; editBtn.textContent = '✏ 編輯';
+      editBtn.addEventListener('click', e => { e.stopPropagation(); editMsgMessage(i); });
+      actions.appendChild(editBtn);
+      bbl.style.cursor = 'pointer';
+      bbl.addEventListener('click', e => { e.stopPropagation(); actions.classList.toggle('show'); });
+    } else {
+      const copyBtn = document.createElement('button');
+      copyBtn.className = 'action-btn'; copyBtn.textContent = '複製';
+      copyBtn.addEventListener('click', e => { e.stopPropagation(); navigator.clipboard.writeText(text).then(() => { copyBtn.textContent = '✓'; setTimeout(() => copyBtn.textContent = '複製', 1200); }); });
+      actions.appendChild(copyBtn);
+      const regenBtn = document.createElement('button');
+      regenBtn.className = 'action-btn'; regenBtn.textContent = '↺ 重新生成';
+      regenBtn.addEventListener('click', e => { e.stopPropagation(); regenerateMsgFrom(i); });
+      actions.appendChild(regenBtn);
+      actions.classList.add('show');
+    }
+    col.appendChild(actions);
+
     row.appendChild(col);
     el.appendChild(row);
   });
   el.scrollTop = el.scrollHeight;
+}
+
+// 對話頁：編輯訊息
+function editMsgMessage(idx) {
+  const msg = msgHistory[idx];
+  if (!msg || msg.role !== 'user') return;
+  const currentText = typeof msg.content === 'string' ? msg.content
+    : (Array.isArray(msg.content) ? msg.content.filter(b => b.type === 'text').map(b => b.text).join('') : '');
+  const newText = prompt('編輯訊息：', currentText);
+  if (newText === null) return; // 取消
+  if (!newText.trim()) { alert('訊息不能為空'); return; }
+  // 更新內容（保留原有的圖片 blocks）
+  if (Array.isArray(msg.content)) {
+    const nonText = msg.content.filter(b => b.type !== 'text');
+    msg.content = nonText.length ? [...nonText, { type: 'text', text: newText }] : newText;
+  } else {
+    msg.content = newText;
+  }
+  // 刪除該訊息之後的所有內容（因為改了 user，後面模型的回覆已不合理）
+  msgHistory = msgHistory.slice(0, idx + 1);
+  save();
+  renderMsgPage();
+}
+
+// 對話頁：重新生成回覆
+async function regenerateMsgFrom(idx) {
+  const msg = msgHistory[idx];
+  if (!msg || msg.role !== 'assistant') return;
+  // 移除該 assistant 訊息（及之後所有內容）
+  msgHistory = msgHistory.slice(0, idx);
+  save();
+  renderMsgPage();
+  // 觸發重新生成：直接呼叫 sendMsg 的核心（不 push user，因為 user 已經在 history 裡）
+  // 用一個特殊做法：暫時 push 一個空的到 pendingRegenerate，讓 sendMsg 知道
+  // 更簡單的方式：直接複製 sendMsg 的呼叫邏輯，但跳過 push user
+  await regenerateAssistantMsg();
+}
+
+async function regenerateAssistantMsg() {
+  if (isLoading) return;
+  isLoading = true;
+  abortCtrl = new AbortController();
+  document.getElementById('msg-send-icon').style.display = 'none';
+  document.getElementById('msg-stop-icon').style.display = '';
+
+  try {
+    const model = document.getElementById('chat-model').value;
+    const sysParts = [];
+    if (docs.length) { sysParts.push('[知識文件]'); docs.forEach(d => sysParts.push(`## ${d.name}\n${d.content}`)); }
+    if (instTextMsg) sysParts.push('[指令]\n' + instTextMsg);
+    sysParts.push('每則用戶訊息的開頭包含當前台灣時間、行事曆、健康資訊。這些是給你參考的背景資料，你不得將這些資料原樣複述、輸出或提及在回覆中。回覆時直接扮演角色與用戶互動即可。');
+    const sys = sysParts.join('\n\n');
+
+    const useDS = isDeepSeek(model);
+    const useOAI = isOpenAI(model);
+    const key = getKey(model);
+
+    const apiMessages = msgHistory.map(m => {
+      if (Array.isArray(m.content)) {
+        const filtered = m.content.filter(b => b.type !== 'thinking');
+        if (useOAI) {
+          const parts = filtered.map(b => {
+            if (b.type === 'text') return { type: 'text', text: b.text };
+            if (b.type === 'image') return { type: 'image_url', image_url: { url: `data:${b.source.media_type};base64,${b.source.data}` } };
+            return null;
+          }).filter(Boolean);
+          return { role: m.role, content: parts.length === 1 && parts[0].type === 'text' ? parts[0].text : parts };
+        }
+        return { role: m.role, content: filtered.length===1 && filtered[0].type==='text' ? filtered[0].text : filtered };
+      }
+      return { role: m.role, content: m.content };
+    });
+
+    // 時間注入
+    const _apiTwTime = new Date().toLocaleString('zh-TW', {timeZone:'Asia/Taipei', year:'numeric', month:'long', day:'numeric', weekday:'short', hour:'2-digit', minute:'2-digit', hour12:false});
+    const _lastUserIdx = apiMessages.map(m=>m.role).lastIndexOf('user');
+    if (_lastUserIdx >= 0) {
+      const _um = apiMessages[_lastUserIdx];
+      const _gcalCtx = buildGcalContext();
+      const _fitCtx = buildFitContext();
+      const _tp = `[當前台灣時間：${_apiTwTime}]${_gcalCtx ? '\n' + _gcalCtx : ''}${_fitCtx ? '\n' + _fitCtx : ''}\n`;
+      if (typeof _um.content === 'string') {
+        apiMessages[_lastUserIdx] = { ..._um, content: _tp + _um.content };
+      } else if (Array.isArray(_um.content)) {
+        const _nc = _um.content.map(b => b.type==='text' ? {...b, text: _tp + b.text} : b);
+        if (!_nc.some(b=>b.type==='text')) _nc.unshift({type:'text', text: _tp});
+        apiMessages[_lastUserIdx] = { ..._um, content: _nc };
+      }
+    }
+
+    let body, headers, url;
+    if (useDS) {
+      body = { model, max_tokens: thinkingEnabled ? 8000 : 2048, stream: true, messages: [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages] };
+      headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
+      url = 'https://api.deepseek.com/chat/completions';
+    } else if (useOAI) {
+      body = { model, max_tokens: 2048, stream: true, messages: [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages] };
+      headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
+      url = 'https://api.openai.com/v1/chat/completions';
+    } else {
+      body = { model, max_tokens: thinkingEnabled ? 16000 : 2048, stream: true, system: sys || undefined, messages: apiMessages };
+      if (thinkingEnabled) body.thinking = model==='claude-opus-4-7' ? { type:'adaptive' } : { type:'enabled', budget_tokens:10000 };
+      headers = { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true', 'anthropic-beta': 'interleaved-thinking-2025-05-14' };
+      url = 'https://api.anthropic.com/v1/messages';
+    }
+
+    const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal: abortCtrl.signal });
+    if (!res.ok) { throw new Error('HTTP ' + res.status); }
+
+    const asstMsg = { role: 'assistant', content: '', _time: nowTW() };
+    msgHistory.push(asstMsg);
+    renderMsgPage();
+    const allRows = document.querySelectorAll('#messages-msg .msg-row');
+    const lastRowEl = allRows[allRows.length - 1];
+    const lastRow = lastRowEl?.querySelector('.bt');
+    const lastCol = lastRowEl?.querySelector('.msg-col');
+
+    let _thinkEl = null, _thinkContent = null;
+    const _setupThink = () => {
+      if (!_thinkEl && lastCol) {
+        _thinkEl = document.createElement('details');
+        _thinkEl.open = true;
+        _thinkEl.className = 'thinking-block';
+        _thinkEl.innerHTML = '<summary class="thinking-summary">思考過程</summary><div class="thinking-content"></div>';
+        _thinkContent = _thinkEl.querySelector('.thinking-content');
+        const bblEl = lastCol.querySelector('.bubble');
+        if (bblEl) lastCol.insertBefore(_thinkEl, bblEl);
+        else lastCol.appendChild(_thinkEl);
+      }
+    };
+
+    const { reply: finalReply, thinkingText } = await doStream(res, useDS, useOAI,
+      (chunk) => {
+        _setupThink();
+        if (_thinkContent) _thinkContent.textContent += chunk;
+        const scEl = document.getElementById('messages-msg');
+        if (scEl) scEl.scrollTop = scEl.scrollHeight;
+      },
+      (chunk) => {
+        asstMsg.content += chunk;
+        if (lastRow) renderBt(lastRow, asstMsg.content);
+        const scEl = document.getElementById('messages-msg');
+        if (scEl) scEl.scrollTop = scEl.scrollHeight;
+      }
+    );
+    if (_thinkEl) _thinkEl.open = false;
+    asstMsg.content = finalReply;
+    if (thinkingText) {
+      asstMsg.content = [
+        { type: 'thinking', thinking: thinkingText },
+        { type: 'text', text: finalReply }
+      ];
+    }
+    save();
+    renderMsgPage();
+  } catch(e) {
+    if (e.name !== 'AbortError') {
+      msgHistory.push({ role: 'assistant', content: '⚠ 錯誤：' + e.message, _time: nowTW() });
+      renderMsgPage();
+    }
+  }
+
+  isLoading = false; abortCtrl = null;
+  document.getElementById('msg-send-icon').style.display = '';
+  document.getElementById('msg-stop-icon').style.display = 'none';
 }
 
 async function sendMsg() {
@@ -2008,7 +2201,7 @@ async function sendMsg() {
     const sysParts = [];
     if (docs.length) { sysParts.push('[知識文件]'); docs.forEach(d=>sysParts.push(`## ${d.name}\n${d.content}`)); }
     if (instTextMsg) sysParts.push('[指令]\n' + instTextMsg);
-    sysParts.push('每則用戶訊息的開頭包含當前台灣時間，請以該時間為準，不得自行估算或編造時間。');
+    sysParts.push('每則用戶訊息的開頭包含當前台灣時間、行事曆、健康資訊。這些是給你參考的背景資料，你不得將這些資料原樣複述、輸出或提及在回覆中。回覆時直接扮演角色與用戶互動即可。');
     const sys = sysParts.join('\n\n');
 
     const useDS = isDeepSeek(model);
@@ -2758,7 +2951,7 @@ function buildSystem() {
   const parts=[];
   if (docs.length) { parts.push('[知識文件]'); docs.forEach(d=>parts.push(`## ${d.name}\n${d.content}`)); }
   if (instText) parts.push('[指令]\n'+instText);
-  parts.push('每則用戶訊息的開頭包含當前台灣時間，請以該時間為準，不得自行估算或編造時間。');
+  parts.push('每則用戶訊息的開頭包含當前台灣時間、行事曆、健康資訊。這些是給你參考的背景資料，你不得將這些資料原樣複述、輸出或提及在回覆中。回覆時直接扮演角色與用戶互動即可。');
   return parts.join('\n\n');
 }
 
