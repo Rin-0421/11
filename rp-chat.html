@@ -1134,10 +1134,18 @@ async function fetchGcalEvents() {
   const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
   const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 30).toISOString();
   const url = `https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${encodeURIComponent(start)}&timeMax=${encodeURIComponent(end)}&singleEvents=true&orderBy=startTime&maxResults=250`;
+  console.log('[gcal] fetching:', url);
   try {
     const res = await fetch(url, { headers: { 'Authorization': `Bearer ${gcalToken}` } });
-    if (!res.ok) { console.error('gcal fetch failed', res.status); return; }
+    console.log('[gcal] status:', res.status);
+    if (!res.ok) {
+      const errBody = await res.text();
+      console.error('[gcal] fetch failed', res.status, errBody);
+      alert('行事曆抓取失敗：' + res.status + '\n' + errBody.slice(0, 200));
+      return;
+    }
     const data = await res.json();
+    console.log('[gcal] got items:', data.items?.length);
     gcalEvents = data.items || [];
     gcalSnapshotTime = Date.now();
     save(); // 存快照
@@ -1208,7 +1216,8 @@ function buildGcalContext() {
 
 // ── Google Fit ──
 async function fetchFitData() {
-  if (!gcalToken) return;
+  if (!gcalToken) { console.log('[fit] no token'); return; }
+  console.log('[fit] start fetching');
   const now = new Date();
   const endMs = now.getTime();
   const startMs = endMs - 5 * 24 * 60 * 60 * 1000;
@@ -1224,8 +1233,11 @@ async function fetchFitData() {
         startTimeMillis: startMs, endTimeMillis: endMs
       })
     });
+    console.log('[fit] steps status:', stepsRes.status);
+    if (!stepsRes.ok) { const t = await stepsRes.text(); console.error('[fit] steps err:', t); }
     if (stepsRes.ok) {
       const d = await stepsRes.json();
+      console.log('[fit] steps buckets:', d.bucket?.length);
       fitData.steps = (d.bucket || []).map(b => ({
         date: new Date(parseInt(b.startTimeMillis)).toISOString().slice(0, 10),
         value: b.dataset[0]?.point?.reduce((s, p) => s + (p.value[0]?.intVal || 0), 0) || 0
@@ -1242,8 +1254,11 @@ async function fetchFitData() {
         startTimeMillis: startMs, endTimeMillis: endMs
       })
     });
+    console.log('[fit] hr status:', hrRes.status);
+    if (!hrRes.ok) { const t = await hrRes.text(); console.error('[fit] hr err:', t); }
     if (hrRes.ok) {
       const d = await hrRes.json();
+      console.log('[fit] hr buckets:', d.bucket?.length);
       fitData.heart = (d.bucket || []).map(b => {
         const pt = b.dataset[0]?.point?.[0]?.value;
         return {
@@ -1261,8 +1276,11 @@ async function fetchFitData() {
     const sleepRes = await fetch(`https://www.googleapis.com/fitness/v1/users/me/sessions?startTime=${encodeURIComponent(sleepStart)}&endTime=${encodeURIComponent(sleepEnd)}&activityType=72`, {
       headers: { 'Authorization': `Bearer ${gcalToken}` }
     });
+    console.log('[fit] sleep status:', sleepRes.status);
+    if (!sleepRes.ok) { const t = await sleepRes.text(); console.error('[fit] sleep err:', t); }
     if (sleepRes.ok) {
       const d = await sleepRes.json();
+      console.log('[fit] sleep sessions:', d.session?.length);
       fitData.sleep = (d.session || []).map(s => {
         const start = new Date(parseInt(s.startTimeMillis));
         const end = new Date(parseInt(s.endTimeMillis));
