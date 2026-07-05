@@ -616,11 +616,9 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
   <div class="input-area">
     <div id="msg-file-preview"></div>
     <div class="input-row">
-      <button class="attach-btn" id="msg-attach-btn">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
-      </button>
+      <button class="attach-btn" id="msg-attach-btn">📎</button>
       <input type="file" id="msg-file-input" accept="image/*,.pdf" multiple style="display:none">
-      <textarea id="msg-user-input" class="user-input" placeholder="輸入訊息…" rows="1"></textarea>
+      <textarea id="msg-user-input" placeholder="傳訊息給角色…" rows="1"></textarea>
       <button class="send-btn" id="msg-send-btn">
         <svg id="msg-send-icon" viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
         <svg id="msg-stop-icon" viewBox="0 0 24 24" style="display:none"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
@@ -1151,6 +1149,7 @@ function switchPage(target) {
   if (target==='messages') {
     document.getElementById('msg-hdr-name').textContent = charName || '角色';
     setAv('msg-hdr-av-img','msg-hdr-av-ph',avatarB64);
+    document.getElementById('msg-user-input').placeholder = `傳訊息給${charName || '角色'}…`;
     renderMsgPage();
   }
   if (target==='extra') { renderFitPage(); renderMsgArchives(); }
@@ -1879,14 +1878,7 @@ function renderMsgPage() {
   const el = document.getElementById('messages-msg');
   if (!el) return;
   el.innerHTML = '';
-  if (!msgHistory.length) {
-    const empty = document.createElement('div');
-    empty.className = 'msg-empty-hint';
-    empty.style.padding = '40px 20px';
-    empty.textContent = '和角色開始對話…';
-    el.appendChild(empty);
-    return;
-  }
+  if (!msgHistory.length) return;
   msgHistory.forEach((m, i) => {
     const row = document.createElement('div');
     row.className = `msg-row ${m.role} msg-mode`;  // msg-mode 讓 CSS 恢復氣泡
@@ -2284,6 +2276,8 @@ function doSaveSettings() {
   instTextMsg=document.getElementById('pg-inst-msg').value.trim();
   document.getElementById('hdr-name').textContent=charName;
   document.getElementById('msg-hdr-name').textContent=charName;
+  const msgInput = document.getElementById('msg-user-input');
+  if (msgInput) msgInput.placeholder = `傳訊息給${charName}…`;
   setAv('hdr-av-img','hdr-av-ph',avatarB64);
   setAv('msg-hdr-av-img','msg-hdr-av-ph',avatarB64);
   save();
