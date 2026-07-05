@@ -1388,7 +1388,7 @@ async function fetchFitData() {
       const d = await stepsRes.json();
       console.log('[fit] steps buckets:', d.bucket?.length);
       fitData.steps = (d.bucket || []).map(b => ({
-        date: new Date(parseInt(b.startTimeMillis)).toISOString().slice(0, 10),
+        date: new Date(parseInt(b.startTimeMillis) + 8*3600000).toISOString().slice(0, 10),
         value: b.dataset[0]?.point?.reduce((s, p) => s + (p.value[0]?.intVal || 0), 0) || 0
       }));
     }
@@ -1409,7 +1409,7 @@ async function fetchFitData() {
       const d = await hpRes.json();
       console.log('[fit] hp buckets:', d.bucket?.length);
       fitData.heart = (d.bucket || []).map(b => ({
-        date: new Date(parseInt(b.startTimeMillis)).toISOString().slice(0, 10),
+        date: new Date(parseInt(b.startTimeMillis) + 8*3600000).toISOString().slice(0, 10),
         points: Math.round(b.dataset[0]?.point?.reduce((s, p) => s + (p.value[0]?.fpVal || 0), 0) || 0)
       }));
     }
