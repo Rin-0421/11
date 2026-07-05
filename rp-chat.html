@@ -1934,6 +1934,15 @@ function renderMsgPage() {
         bbl.appendChild(grid);
       }
     }
+    // 思考區塊還原（放在氣泡之前）
+    const thinkText = Array.isArray(m.content) ? (m.content.find(b => b.type === 'thinking')?.thinking || null) : null;
+    if (thinkText) {
+      const th = document.createElement('details');
+      th.className = 'thinking-block';
+      const esc2 = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      th.innerHTML = '<summary class="thinking-summary">思考過程</summary><div class="thinking-content">' + esc2(thinkText) + '</div>';
+      col.appendChild(th);
+    }
     const sp = document.createElement('span');
     sp.className = 'bt';
     const text = typeof m.content === 'string' ? m.content
@@ -2050,12 +2059,35 @@ async function sendMsg() {
     const asstMsg = { role: 'assistant', content: '', _time: nowTW() };
     msgHistory.push(asstMsg);
     renderMsgPage();
-    // 抓到最後一個 msg-row 的 .bt（就是剛加的 assistant 那個）
+    // 抓到最後一個 msg-row
     const allRows = document.querySelectorAll('#messages-msg .msg-row');
-    const lastRow = allRows[allRows.length - 1]?.querySelector('.bt');
+    const lastRowEl = allRows[allRows.length - 1];
+    const lastRow = lastRowEl?.querySelector('.bt');
+    const lastCol = lastRowEl?.querySelector('.msg-col');
 
-    const { reply: finalReply } = await doStream(res, useDS, useOAI,
-      (chunk) => { /* thinking 略過 */ },
+    // 思考區塊（懶建立）
+    let _thinkEl = null, _thinkContent = null;
+    const _setupThink = () => {
+      if (!_thinkEl && lastCol) {
+        _thinkEl = document.createElement('details');
+        _thinkEl.open = true;
+        _thinkEl.className = 'thinking-block';
+        _thinkEl.innerHTML = '<summary class="thinking-summary">思考過程</summary><div class="thinking-content"></div>';
+        _thinkContent = _thinkEl.querySelector('.thinking-content');
+        // 插在氣泡之前
+        const bblEl = lastCol.querySelector('.bubble');
+        if (bblEl) lastCol.insertBefore(_thinkEl, bblEl);
+        else lastCol.appendChild(_thinkEl);
+      }
+    };
+
+    const { reply: finalReply, thinkingText } = await doStream(res, useDS, useOAI,
+      (chunk) => {
+        _setupThink();
+        if (_thinkContent) _thinkContent.textContent += chunk;
+        const scEl = document.getElementById('messages-msg');
+        if (scEl) scEl.scrollTop = scEl.scrollHeight;
+      },
       (chunk) => {
         asstMsg.content += chunk;
         if (lastRow) renderBt(lastRow, asstMsg.content);
@@ -2063,7 +2095,15 @@ async function sendMsg() {
         if (scEl) scEl.scrollTop = scEl.scrollHeight;
       }
     );
+    if (_thinkEl) _thinkEl.open = false;
     asstMsg.content = finalReply;
+    // 將思考也存進 msgHistory，方便下次還原
+    if (thinkingText) {
+      asstMsg.content = [
+        { type: 'thinking', thinking: thinkingText },
+        { type: 'text', text: finalReply }
+      ];
+    }
     save();
     renderMsgPage();
   } catch(e) {
