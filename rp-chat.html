@@ -1133,26 +1133,55 @@ async function fetchGcalEvents() {
   const now = new Date();
   const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
   const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 30).toISOString();
-  const url = `https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${encodeURIComponent(start)}&timeMax=${encodeURIComponent(end)}&singleEvents=true&orderBy=startTime&maxResults=250`;
-  console.log('[gcal] fetching:', url);
   try {
-    const res = await fetch(url, { headers: { 'Authorization': `Bearer ${gcalToken}` } });
-    console.log('[gcal] status:', res.status);
-    if (!res.ok) {
-      const errBody = await res.text();
-      console.error('[gcal] fetch failed', res.status, errBody);
-      alert('行事曆抓取失敗：' + res.status + '\n' + errBody.slice(0, 200));
+    // 先抓所有行事曆清單
+    const listRes = await fetch('https://www.googleapis.com/calendar/v3/users/me/calendarList', {
+      headers: { 'Authorization': `Bearer ${gcalToken}` }
+    });
+    console.log('[gcal] calendarList status:', listRes.status);
+    if (!listRes.ok) {
+      const errBody = await listRes.text();
+      console.error('[gcal] calendarList failed', errBody);
+      alert('行事曆清單抓取失敗：' + listRes.status + '\n' + errBody.slice(0, 200));
       return;
     }
-    const data = await res.json();
-    console.log('[gcal] got items:', data.items?.length);
-    gcalEvents = data.items || [];
+    const listData = await listRes.json();
+    const calendars = listData.items || [];
+    console.log('[gcal] found calendars:', calendars.length, calendars.map(c=>c.summary));
+
+    // 遍歷每個行事曆抓事件
+    let allEvents = [];
+    for (const cal of calendars) {
+      const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(cal.id)}/events?timeMin=${encodeURIComponent(start)}&timeMax=${encodeURIComponent(end)}&singleEvents=true&orderBy=startTime&maxResults=250`;
+      try {
+        const res = await fetch(url, { headers: { 'Authorization': `Bearer ${gcalToken}` } });
+        if (!res.ok) {
+          console.warn('[gcal] skip calendar', cal.summary, res.status);
+          continue;
+        }
+        const data = await res.json();
+        console.log('[gcal] cal:', cal.summary, 'items:', data.items?.length);
+        (data.items || []).forEach(ev => { ev._calName = cal.summary; });
+        allEvents = allEvents.concat(data.items || []);
+      } catch(e) { console.warn('[gcal] err on', cal.summary, e); }
+    }
+    // 按開始時間排序
+    allEvents.sort((a, b) => {
+      const ta = a.start.dateTime || a.start.date;
+      const tb = b.start.dateTime || b.start.date;
+      return ta.localeCompare(tb);
+    });
+    console.log('[gcal] total events:', allEvents.length);
+    // Debug 訊息
+    const debugMsg = calendars.map(c=>`${c.summary}: ${allEvents.filter(e=>e._calName===c.summary).length}`).join('\n');
+    alert('抓到的行事曆與事件數：\n' + debugMsg + '\n\n總計：' + allEvents.length + ' 個事件');
+    gcalEvents = allEvents;
     gcalSnapshotTime = Date.now();
-    save(); // 存快照
+    save();
     renderGcalPage();
     checkAndNotify();
-    fetchFitData(); // 同時抓健康資料
-  } catch(e) { console.error('gcal fetch error', e); }
+    fetchFitData();
+  } catch(e) { console.error('gcal fetch error', e); alert('行事曆抓取錯誤：' + e.message); }
 }
 
 function renderGcalPage() {
@@ -1445,7 +1474,13 @@ async function generateProactive(conv) {
   const key = getKey(model);
   if (!key) return;
   const sys = buildSystem();
-  const userPrompt = `距離用戶上次互動已經超過 3 小時，請以角色身份主動傳一則簡短適中（30-100字）的訊息給用戶，可以是關心、閒聊或分享。`;
+  const _twNow = new Date().toLocaleString('zh-TW', {timeZone:'Asia/Taipei', year:'numeric', month:'long', day:'numeric', weekday:'short', hour:'2-digit', minute:'2-digit', hour12:false});
+  const _gcalCtx = buildGcalContext();
+  const _fitCtx = buildFitContext();
+  const contextParts = [`[當前台灣時間：${_twNow}]`];
+  if (_gcalCtx) contextParts.push(_gcalCtx);
+  if (_fitCtx) contextParts.push(_fitCtx);
+  const userPrompt = `${contextParts.join('\n')}\n\n距離用戶上次互動已經超過 3 小時，請以角色身份主動傳一則簡短適中（30-100字）的訊息給用戶，可以是關心、閒聊或分享。請以上面提供的時間、行程、健康資料為準，不要編造。`;
 
   const apiMessages = conv.history.filter(m => !m._notice).map(m => {
     if (Array.isArray(m.content)) {
