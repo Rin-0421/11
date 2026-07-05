@@ -712,8 +712,13 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
     <div class="card" style="max-width:none">
       <div class="card-title">主動訊息</div>
       <div style="font-size:11px;color:var(--text-dim);margin-bottom:10px;line-height:1.5">
-        勾選的對話會在 09:00~21:00 且距離上次互動超過 3 小時時自動觸發一則角色訊息，一天最多 2 則。若你未回覆則暫停，直到你回覆才重新計時。
+        09:00~21:00 之間，距離上次互動超過 3 小時時，角色會主動傳訊息。主頁和對話頁共用每日上限，一天最多 3 次。上次未回覆時暫停，直到你回覆才重新計時。
       </div>
+      <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:6px 0;border-bottom:1px solid var(--border);margin-bottom:8px">
+        <span style="font-size:13px;font-weight:600">📩 對話頁（訊息模式）</span>
+        <input type="checkbox" id="pg-proactive-msg" style="width:44px;height:24px;cursor:pointer">
+      </label>
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:8px">主頁對話：</div>
       <div id="pg-proactive-list"></div>
     </div>
     <div class="card" style="max-width:none;margin-top:12px">
@@ -898,7 +903,7 @@ let gcalClientId = '', gcalToken = null, gcalTokenExpiry = 0, gcalInject = false
 let fitInject = false, fitData = { heart: [], steps: [], sleep: [] }, fitSnapshotTime = 0;
 let proactiveConvIds = [], proactiveState = { lastCheckDate: '', dailyCounts: {} }, proactiveTimer = null;
 let notifications = [], notifEnabled = false, notifLeadMin = 10, notifCheckTimer = null, notifiedIds = new Set();
-let instTextMsg = '', msgHistory = [], msgArchives = [], msgPendingFiles = [];
+let instTextMsg = '', msgHistory = [], msgArchives = [], msgPendingFiles = [], proactiveMsgEnabled = false;
 const NOTIF_VIEW_ID = '__notifications__';
 
 const COMPRESS_THRESHOLD = 50;
@@ -981,7 +986,8 @@ async function loadState() {
       fitData = s.fitData || { heart: [], steps: [], sleep: [] };
       fitSnapshotTime = s.fitSnapshotTime || 0;
       proactiveConvIds = Array.isArray(s.proactiveConvIds) ? s.proactiveConvIds : [];
-      proactiveState = s.proactiveState || { lastCheckDate: '', dailyCounts: {} };
+      proactiveState = s.proactiveState || { lastCheckDate: '', dailyCount: 0, messagesEndTime: 0 };
+      if (typeof proactiveState.dailyCount === 'undefined') proactiveState.dailyCount = 0;
       notifications = Array.isArray(s.notifications) ? s.notifications : [];
       notifEnabled = !!s.notifEnabled;
       notifLeadMin = typeof s.notifLeadMin === 'number' ? s.notifLeadMin : 10;
@@ -989,6 +995,7 @@ async function loadState() {
       instTextMsg = s.instTextMsg || '';
       msgHistory = Array.isArray(s.msgHistory) ? s.msgHistory : [];
       msgArchives = Array.isArray(s.msgArchives) ? s.msgArchives : [];
+      proactiveMsgEnabled = !!s.proactiveMsgEnabled;
       applyDarkMode();
       conversations = s.conversations || [];
       currentConvId = s.currentConvId || null;
@@ -1027,7 +1034,7 @@ async function save() {
       darkMode, gcalClientId, gcalInject, gcalEvents, gcalSnapshotTime,
       fitInject, fitData, fitSnapshotTime, proactiveConvIds, proactiveState,
       notifications, notifEnabled, notifLeadMin, notifiedIds: Array.from(notifiedIds),
-      instTextMsg, msgHistory, msgArchives,
+      instTextMsg, msgHistory, msgArchives, proactiveMsgEnabled,
       conversations, currentConvId,
       model: document.getElementById('chat-model').value
     });
@@ -1503,41 +1510,62 @@ function renderProactiveList() {
 }
 
 async function checkProactive() {
-  if (!proactiveConvIds.length) return;
   const now = new Date();
   const hour = now.getHours();
   if (hour < 9 || hour >= 21) return; // 只在 09:00~21:00
   const todayKey = now.toISOString().slice(0, 10);
 
-  // 每日重置計數
+  // 每日重置計數（主頁+對話共用同一個計數）
   if (proactiveState.lastCheckDate !== todayKey) {
-    proactiveState.dailyCounts = {};
+    proactiveState.dailyCount = 0;
     proactiveState.lastCheckDate = todayKey;
   }
 
+  // 一天最多 3 次
+  if (proactiveState.dailyCount >= 3) return;
+
+  // ── 主頁對話檢查 ──
   for (const convId of proactiveConvIds) {
+    if (proactiveState.dailyCount >= 3) break;
     const conv = conversations.find(c => c.id === convId);
     if (!conv || !conv.history.length) continue;
-    // 每日上限 2 則
-    if ((proactiveState.dailyCounts[convId] || 0) >= 2) continue;
+    // 上次是 proactive 且未回覆 → 暫停
+    const last = conv.history[conv.history.length - 1];
+    if (last && last.role === 'assistant' && last._proactive) continue;
     // 找最後一則有 _time 的訊息
     const lastMsg = [...conv.history].reverse().find(m => m._time);
     if (!lastMsg || !lastMsg._time) continue;
-    // 若最後一則是 assistant，代表上次是模型主動說話（等你回覆），暫停
-    if (conv.history[conv.history.length - 1].role === 'assistant') {
-      const lastActual = conv.history[conv.history.length - 1];
-      // 若這則 assistant 有 _proactive 標記，代表未回覆狀態
-      if (lastActual._proactive) continue;
-    }
-    // 解析上次時間（_time 格式：2026年7月5日週日 15:30）
     const lastMsgTs = parseTwTime(lastMsg._time);
     if (!lastMsgTs) continue;
     const diffMs = now.getTime() - lastMsgTs;
-    if (diffMs < 3 * 60 * 60 * 1000) continue; // 未滿 3 小時
+    if (diffMs < 3 * 60 * 60 * 1000) continue;
+    // 觸發
+    const ok = await generateProactive(conv);
+    if (ok) proactiveState.dailyCount++;
+    save();
+  }
 
-    // 觸發！
-    await generateProactive(conv);
-    proactiveState.dailyCounts[convId] = (proactiveState.dailyCounts[convId] || 0) + 1;
+  // ── 對話頁檢查 ──
+  if (proactiveState.dailyCount >= 3) return;
+  if (proactiveMsgEnabled) {
+    // 上次是 proactive 且未回覆 → 暫停
+    const last = msgHistory[msgHistory.length - 1];
+    if (last && last.role === 'assistant' && last._proactive) return;
+    // 判斷觸發時間
+    let lastTs;
+    if (msgHistory.length) {
+      const lastMsg = [...msgHistory].reverse().find(m => m._time);
+      if (!lastMsg) return;
+      lastTs = parseTwTime(lastMsg._time);
+    } else {
+      // 空對話 → 用 messagesEndTime（結束對話的時間）
+      lastTs = proactiveState.messagesEndTime;
+    }
+    if (!lastTs) return;
+    if (now.getTime() - lastTs < 3 * 60 * 60 * 1000) return;
+    // 觸發（傳 null 代表對話頁）
+    const ok = await generateProactiveMsg();
+    if (ok) proactiveState.dailyCount++;
     save();
   }
 }
@@ -1554,7 +1582,7 @@ async function generateProactive(conv) {
   const useDS = isDeepSeek(model);
   const useOAI = isOpenAI(model);
   const key = getKey(model);
-  if (!key) return;
+  if (!key) return false;
   const sys = buildSystem();
   const _twNow = new Date().toLocaleString('zh-TW', {timeZone:'Asia/Taipei', year:'numeric', month:'long', day:'numeric', weekday:'short', hour:'2-digit', minute:'2-digit', hour12:false});
   const _gcalCtx = buildGcalContext();
@@ -1562,7 +1590,7 @@ async function generateProactive(conv) {
   const contextParts = [`[當前台灣時間：${_twNow}]`];
   if (_gcalCtx) contextParts.push(_gcalCtx);
   if (_fitCtx) contextParts.push(_fitCtx);
-  const userPrompt = `${contextParts.join('\n')}\n\n距離用戶上次互動已經超過 3 小時，請以角色身份主動傳一則簡短適中（30-100字）的訊息給用戶，可以是關心、閒聊或分享。請以上面提供的時間、行程、健康資料為準，不要編造。`;
+  const userPrompt = `${contextParts.join('\n')}\n\n距離用戶上次互動已經超過 3 小時，請以角色身份主動傳一則簡短的訊息給用戶（建議簡短一點，關心、閒聊或分享皆可）。請以上面提供的時間、行程、健康資料為準，不要編造。`;
 
   const apiMessages = conv.history.filter(m => !m._notice).map(m => {
     if (Array.isArray(m.content)) {
@@ -1576,31 +1604,32 @@ async function generateProactive(conv) {
   try {
     let body, headers, url, reply = '';
     if (useDS) {
-      body = { model, max_tokens: 400, messages: [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages] };
+      body = { model, max_tokens: 2000, messages: [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages] };
       headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
       url = 'https://api.deepseek.com/chat/completions';
       const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
-      if (!res.ok) return;
+      if (!res.ok) return false;
       const d = await res.json();
       reply = d.choices?.[0]?.message?.content || '';
     } else if (useOAI) {
-      body = { model, max_tokens: 400, messages: [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages] };
+      body = { model, max_tokens: 2000, messages: [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages] };
       headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
       url = 'https://api.openai.com/v1/chat/completions';
       const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
-      if (!res.ok) return;
+      if (!res.ok) return false;
       const d = await res.json();
       reply = d.choices?.[0]?.message?.content || '';
     } else {
-      body = { model, max_tokens: 400, system: sys || undefined, messages: apiMessages };
+      // Claude：明確關閉思考
+      body = { model, max_tokens: 2000, system: sys || undefined, messages: apiMessages };
       headers = { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' };
       url = 'https://api.anthropic.com/v1/messages';
       const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
-      if (!res.ok) return;
+      if (!res.ok) return false;
       const d = await res.json();
       reply = d.content?.find(b => b.type==='text')?.text || '';
     }
-    if (!reply) return;
+    if (!reply) return false;
     const time = nowTW();
     conv.history.push({ role: 'assistant', content: reply, _time: time, _proactive: true });
     save();
@@ -1614,7 +1643,89 @@ async function generateProactive(conv) {
     }
     // 觸發壓縮判斷（若對話累積夠了）
     if (currentConvId === conv.id) await maybeCompress();
-  } catch(e) { console.error('proactive gen failed', e); }
+    return true;
+  } catch(e) { console.error('proactive gen failed', e); return false; }
+}
+
+
+async function generateProactiveMsg() {
+  const model = document.getElementById('chat-model').value;
+  const useDS = isDeepSeek(model);
+  const useOAI = isOpenAI(model);
+  const key = getKey(model);
+  if (!key) return false;
+  // 用對話模式的 system prompt
+  const sysParts = [];
+  if (docs.length) { sysParts.push('[知識文件]'); docs.forEach(d=>sysParts.push(`## ${d.name}\n${d.content}`)); }
+  if (instTextMsg) sysParts.push('[指令]\n' + instTextMsg);
+  sysParts.push('每則用戶訊息的開頭包含當前台灣時間，請以該時間為準，不得自行估算或編造時間。');
+  const sys = sysParts.join('\n\n');
+
+  const _twNow = new Date().toLocaleString('zh-TW', {timeZone:'Asia/Taipei', year:'numeric', month:'long', day:'numeric', weekday:'short', hour:'2-digit', minute:'2-digit', hour12:false});
+  const _gcalCtx = buildGcalContext();
+  const _fitCtx = buildFitContext();
+  const contextParts = [`[當前台灣時間：${_twNow}]`];
+  if (_gcalCtx) contextParts.push(_gcalCtx);
+  if (_fitCtx) contextParts.push(_fitCtx);
+
+  let userPrompt;
+  if (msgHistory.length) {
+    userPrompt = `${contextParts.join('\n')}\n\n距離用戶上次互動已經超過 3 小時，請以角色身份主動傳一則簡短的訊息給用戶（建議簡短一點，關心、閒聊或分享皆可）。請以上面提供的時間、行程、健康資料為準，不要編造。`;
+  } else {
+    userPrompt = `${contextParts.join('\n')}\n\n距離用戶上次對話已經超過 3 小時，這是一段全新的對話開頭，請以角色身份主動傳一則簡短的開場訊息給用戶。請以上面提供的時間、行程、健康資料為準，不要編造。`;
+  }
+
+  const apiMessages = msgHistory.map(m => {
+    if (Array.isArray(m.content)) {
+      const filtered = m.content.filter(b => b.type !== 'thinking');
+      return { role: m.role, content: filtered.length===1 && filtered[0].type==='text' ? filtered[0].text : filtered };
+    }
+    return { role: m.role, content: m.content };
+  });
+  apiMessages.push({ role: 'user', content: userPrompt });
+
+  try {
+    let body, headers, url, reply = '';
+    if (useDS) {
+      body = { model, max_tokens: 2000, messages: [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages] };
+      headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
+      url = 'https://api.deepseek.com/chat/completions';
+      const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
+      if (!res.ok) return false;
+      const d = await res.json();
+      reply = d.choices?.[0]?.message?.content || '';
+    } else if (useOAI) {
+      body = { model, max_tokens: 2000, messages: [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages] };
+      headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
+      url = 'https://api.openai.com/v1/chat/completions';
+      const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
+      if (!res.ok) return false;
+      const d = await res.json();
+      reply = d.choices?.[0]?.message?.content || '';
+    } else {
+      body = { model, max_tokens: 2000, system: sys || undefined, messages: apiMessages };
+      headers = { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' };
+      url = 'https://api.anthropic.com/v1/messages';
+      const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
+      if (!res.ok) return false;
+      const d = await res.json();
+      reply = d.content?.find(b => b.type==='text')?.text || '';
+    }
+    if (!reply) return false;
+    const time = nowTW();
+    msgHistory.push({ role: 'assistant', content: reply, _time: time, _proactive: true });
+    save();
+    // 若當前在對話頁，更新畫面
+    const activePage = document.querySelector('.page.active');
+    if (activePage && activePage.dataset.page === 'messages') renderMsgPage();
+    // 系統通知
+    if ('Notification' in window && Notification.permission === 'granted') {
+      try {
+        new Notification(charName || '訊息', { body: reply.slice(0, 120), icon: avatarB64 || undefined });
+      } catch(e) {}
+    }
+    return true;
+  } catch(e) { console.error('proactive msg gen failed', e); return false; }
 }
 
 // 每 30 分鐘檢查一次主動訊息
@@ -1861,6 +1972,9 @@ async function sendMsg() {
   }
 
   const userTime = nowTW();
+  // 若最後一則是 proactive，清掉標記代表已回覆
+  const lastAsstMsg = msgHistory[msgHistory.length - 1];
+  if (lastAsstMsg && lastAsstMsg._proactive) delete lastAsstMsg._proactive;
   msgHistory.push({ role: 'user', content, _time: userTime });
   save(); renderMsgPage();
 
@@ -1964,6 +2078,8 @@ function endMsgConversation() {
     history: msgHistory
   });
   msgHistory = [];
+  // 記錄結束時間，讓主動訊息從這時起算 3 小時
+  proactiveState.messagesEndTime = Date.now();
   save();
   renderMsgPage();
   renderMsgArchives();
@@ -2104,6 +2220,8 @@ function fillSettingsPage() {
   document.getElementById('pg-gcal-disconnect').style.display = gcalToken ? 'block' : 'none';
   document.getElementById('pg-notif-toggle').checked = notifEnabled;
   document.getElementById('pg-fit-inject').checked = fitInject;
+  // 對話頁主動訊息綁定會在下面
+document.getElementById('pg-proactive-msg').checked = proactiveMsgEnabled;
   renderProactiveList();
   document.getElementById('pg-claude-key').value = apiKey || '';
   document.getElementById('pg-ds-key').value = dsKey || '';
