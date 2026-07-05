@@ -605,14 +605,35 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
 
 <!-- 對話頁（訊息模式） -->
 <div id="page-messages" class="page" data-page="messages">
-  <div class="chat-header" style="justify-content:space-between">
-    <div style="display:flex;align-items:center;gap:8px">
-      <div class="hdr-av" id="msg-hdr-av"><span id="msg-hdr-av-ph">🎭</span><img id="msg-hdr-av-img" style="display:none"></div>
-      <div class="hdr-name" id="msg-hdr-name">角色</div>
+  <div class="chat-header">
+    <div class="hdr-av" id="msg-hdr-av"><span id="msg-hdr-av-ph">🎭</span><img id="msg-hdr-av-img" style="display:none"></div>
+    <span class="hdr-name" id="msg-hdr-name">角色</span>
+    <div class="hdr-btns">
+      <button class="think-toggle" id="msg-think-toggle" title="延伸思考">💭</button>
+      <button class="think-toggle" id="msg-search-toggle" title="網路搜尋">🔍</button>
+      <button class="btn-sm" id="msg-end-btn" style="font-size:12px;padding:5px 8px">結束</button>
     </div>
-    <button class="btn-sm" id="msg-end-btn">結束對話</button>
   </div>
-  <div id="messages-msg" class="messages"></div>
+  <div class="chat-header" style="border-top:none;padding-top:0">
+    <select class="hdr-select" id="msg-model-select" style="flex:1">
+      <optgroup label="Claude">
+        <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
+        <option value="claude-sonnet-4-6" selected>Sonnet 4.6</option>
+        <option value="claude-opus-4-7">Opus 4.7</option>
+        <option value="claude-opus-4-5">Opus 4.5</option>
+        <option value="claude-opus-4-6">Opus 4.6</option>
+      </optgroup>
+      <optgroup label="DeepSeek">
+        <option value="deepseek-v4-flash">DS V4 Flash</option>
+        <option value="deepseek-v4-pro">DS V4 Pro</option>
+      </optgroup>
+      <optgroup label="OpenAI">
+        <option value="gpt-4o-2024-05-13">GPT-4o 5月版</option>
+        <option value="gpt-4.1">GPT-4.1</option>
+      </optgroup>
+    </select>
+  </div>
+  <div id="messages-msg" style="flex:1;overflow-y:auto;padding:14px 13px;display:flex;flex-direction:column;gap:7px"></div>
   <div class="input-area">
     <div id="msg-file-preview"></div>
     <div class="input-row">
@@ -1060,6 +1081,14 @@ function bindAv(btnId, uploadId, fileId, imgId, phId) {
 }
 
 // ── Thinking ──
+function updateMsgThinkBtn() {
+  const btn = document.getElementById('msg-think-toggle');
+  if (btn) btn.classList.toggle('on', thinkingEnabled);
+}
+function updateMsgSearchBtn() {
+  const btn = document.getElementById('msg-search-toggle');
+  if (btn) btn.classList.toggle('on', searchEnabled);
+}
 function updateThinkBtn() {
   const btn = document.getElementById('think-toggle');
   if (thinkingEnabled) btn.classList.add('on');
@@ -1150,6 +1179,9 @@ function switchPage(target) {
     document.getElementById('msg-hdr-name').textContent = charName || '角色';
     setAv('msg-hdr-av-img','msg-hdr-av-ph',avatarB64);
     document.getElementById('msg-user-input').placeholder = `傳訊息給${charName || '角色'}…`;
+    document.getElementById('msg-model-select').value = document.getElementById('chat-model').value;
+    updateMsgThinkBtn();
+    updateMsgSearchBtn();
     renderMsgPage();
   }
   if (target==='extra') { renderFitPage(); renderMsgArchives(); }
@@ -2190,6 +2222,42 @@ setTimeout(() => {
           wrap.appendChild(item);
         });
       });
+    });
+  }
+  // 對話頁模型/思考/搜尋 綁定
+  const msgModelSel = document.getElementById('msg-model-select');
+  const msgThinkBtn = document.getElementById('msg-think-toggle');
+  const msgSearchBtn = document.getElementById('msg-search-toggle');
+  const mainModelSel = document.getElementById('chat-model');
+  if (msgModelSel && mainModelSel) {
+    // 初始同步：對話頁模型 = 主頁模型
+    msgModelSel.value = mainModelSel.value;
+    msgModelSel.addEventListener('change', (e) => {
+      mainModelSel.value = e.target.value;
+      updateThinkBtn();
+      updateSearchBtn();
+      updateMsgThinkBtn();
+      save();
+    });
+  }
+  if (msgThinkBtn) {
+    msgThinkBtn.addEventListener('click', () => {
+      const model = mainModelSel.value;
+      if (!thinkingEnabled && (model==='claude-haiku-4-5-20251001' || isOpenAI(model))) {
+        alert(isOpenAI(model) ? 'OpenAI 模型不支援延伸思考。' : '延伸思考不支援 Haiku。'); return;
+      }
+      thinkingEnabled = !thinkingEnabled;
+      updateThinkBtn();
+      updateMsgThinkBtn();
+      save();
+    });
+  }
+  if (msgSearchBtn) {
+    msgSearchBtn.addEventListener('click', () => {
+      searchEnabled = !searchEnabled;
+      updateSearchBtn();
+      updateMsgSearchBtn();
+      save();
     });
   }
   // 檢視 modal 關閉
