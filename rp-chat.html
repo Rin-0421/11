@@ -2369,6 +2369,14 @@ function doSaveSettings() {
   charName=document.getElementById('pg-name').value.trim()||'角色';
   instText=document.getElementById('pg-inst').value.trim();
   instTextMsg=document.getElementById('pg-inst-msg').value.trim();
+  // 同步主動訊息的所有 checkbox 狀態
+  const pmEl = document.getElementById('pg-proactive-msg');
+  if (pmEl) proactiveMsgEnabled = pmEl.checked;
+  document.querySelectorAll('.pg-proactive-cb').forEach(cb => {
+    const id = cb.dataset.convId;
+    if (cb.checked && !proactiveConvIds.includes(id)) proactiveConvIds.push(id);
+    if (!cb.checked) proactiveConvIds = proactiveConvIds.filter(x => x !== id);
+  });
   document.getElementById('hdr-name').textContent=charName;
   document.getElementById('msg-hdr-name').textContent=charName;
   const msgInput = document.getElementById('msg-user-input');
