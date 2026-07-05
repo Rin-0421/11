@@ -1028,17 +1028,6 @@ async function loadState() {
     renderMessages();
     if (notifEnabled) startNotifTimer();
     startProactiveTimer();
-    // 自動嘗試靜默續期 Google Calendar token
-    if (gcalClientId) {
-      const tryAutoConnect = () => {
-        if (window.google?.accounts?.oauth2) {
-          if (initGcalClient()) ensureGcalToken().then(ok => { if (ok) fetchGcalEvents(); });
-        } else {
-          setTimeout(tryAutoConnect, 500);
-        }
-      };
-      setTimeout(tryAutoConnect, 500);
-    }
   } catch(e) { console.error('load failed', e); }
 }
 loadState();
