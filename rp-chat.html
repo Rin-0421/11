@@ -187,6 +187,22 @@ body.notif-view .chat-header .think-toggle,
 body.notif-view .chat-header #search-toggle,
 body.notif-view .chat-header .hdr-select { display: none; }
 
+/* 其他頁：section 標題 */
+.section-title { font-size: 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: .08em; margin: 4px 4px 10px; font-weight: 600; }
+
+/* 健康區塊 */
+.fit-block { margin-bottom: 8px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--surface); }
+.fit-summary { display: flex; align-items: center; gap: 8px; padding: 12px 14px; cursor: pointer; font-size: 14px; color: var(--text); user-select: none; list-style: none; }
+.fit-summary::-webkit-details-marker { display: none; }
+.fit-summary::before { content: '▶'; font-size: 9px; color: var(--text-dim); transition: transform .15s; display: inline-block; }
+details[open] .fit-summary::before { transform: rotate(90deg); }
+.fit-body { padding: 4px 14px 14px; font-size: 13px; color: var(--text); border-top: 1px solid var(--border); }
+.fit-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px dashed var(--border); }
+.fit-row:last-child { border-bottom: none; }
+.fit-row-date { color: var(--text-dim); font-size: 12px; min-width: 80px; }
+.fit-row-val { color: var(--text); font-size: 13px; text-align: right; }
+.fit-empty { text-align: center; color: var(--text-dim); padding: 20px 0; font-size: 12px; }
+
 /* 行事曆 */
 .cal-day-hdr { font-size: 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: .06em; margin: 14px 4px 8px; }
 .cal-day-hdr:first-child { margin-top: 4px; }
@@ -567,12 +583,16 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
       </label>
     </div>
     <div class="card" style="max-width:none">
-      <div class="card-title">Google 行事曆</div>
+      <div class="card-title">Google</div>
       <label class="lbl">OAuth 用戶端 ID</label>
       <input class="finput" type="text" id="pg-gcal-cid" placeholder="xxxxx.apps.googleusercontent.com" autocomplete="off" spellcheck="false">
       <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;margin-top:4px">
         <span style="font-size:13px">送訊息時附上今日行程</span>
         <input type="checkbox" id="pg-gcal-inject" style="width:44px;height:24px;cursor:pointer">
+      </label>
+      <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;margin-top:4px">
+        <span style="font-size:13px">送訊息時附上健康資料</span>
+        <input type="checkbox" id="pg-fit-inject" style="width:44px;height:24px;cursor:pointer">
       </label>
       <button class="btn-sm" id="pg-gcal-disconnect" style="width:100%;margin-top:8px;display:none">中斷連接</button>
     </div>
@@ -622,6 +642,13 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
       <div class="card-title">自訂指令</div>
       <textarea class="ftextarea" id="pg-inst" style="min-height:96px" placeholder="給 AI 的行為規則…"></textarea>
     </div>
+    <div class="card" style="max-width:none">
+      <div class="card-title">主動訊息</div>
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:10px;line-height:1.5">
+        勾選的對話會在 09:00~21:00 且距離上次互動超過 3 小時時自動觸發一則角色訊息，一天最多 2 則。若你未回覆則暫停，直到你回覆才重新計時。
+      </div>
+      <div id="pg-proactive-list"></div>
+    </div>
     <button class="btn-primary" id="pg-save-btn">儲存設定</button>
     <div class="card" style="max-width:none;margin-top:12px">
       <div class="card-title">匯出／匯入</div>
@@ -657,11 +684,26 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
 
 <!-- 待定頁 -->
 <div id="page-extra" class="page" data-page="extra">
-  <div class="page-hdr">工具</div>
-  <div class="page-body" style="display:flex;align-items:center;justify-content:center;color:var(--text-dim);text-align:center;flex-direction:column;gap:8px">
-    <div style="font-size:36px;opacity:0.4">✧</div>
-    <div style="font-size:14px">待定</div>
-    <div style="font-size:12px;opacity:0.7">還沒想好放什麼</div>
+  <div class="page-hdr">其他</div>
+  <div class="page-body">
+    <div class="section-title">健康</div>
+    <div id="fit-not-connected" style="display:none;color:var(--text-dim);text-align:center;padding:20px;font-size:13px">
+      需先在行事曆頁連接 Google 才能顯示健康資料
+    </div>
+    <div id="fit-content">
+      <details class="fit-block">
+        <summary class="fit-summary">❤ 心率</summary>
+        <div class="fit-body" id="fit-heart-body"></div>
+      </details>
+      <details class="fit-block">
+        <summary class="fit-summary">👟 步數</summary>
+        <div class="fit-body" id="fit-steps-body"></div>
+      </details>
+      <details class="fit-block">
+        <summary class="fit-summary">💤 睡眠</summary>
+        <div class="fit-body" id="fit-sleep-body"></div>
+      </details>
+    </div>
   </div>
 </div>
 
@@ -681,7 +723,7 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
   </button>
   <button class="nav-btn" data-target="extra">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
-    <span class="nav-label">工具</span>
+    <span class="nav-label">其他</span>
   </button>
 </nav>
 
@@ -780,7 +822,9 @@ let searchEnabled = false;
 let conversations = []; // [{ id, name, history }]
 let currentConvId = null;
 let pendingFiles = [], isLoading = false, abortCtrl = null, darkMode = false;
-let gcalClientId = '', gcalToken = null, gcalTokenExpiry = 0, gcalInject = false, gcalEvents = [], gcalTokenClient = null;
+let gcalClientId = '', gcalToken = null, gcalTokenExpiry = 0, gcalInject = false, gcalEvents = [], gcalTokenClient = null, gcalSnapshotTime = 0;
+let fitInject = false, fitData = { heart: [], steps: [], sleep: [] }, fitSnapshotTime = 0;
+let proactiveConvIds = [], proactiveState = { lastCheckDate: '', dailyCounts: {} }, proactiveTimer = null;
 let notifications = [], notifEnabled = false, notifLeadMin = 10, notifCheckTimer = null, notifiedIds = new Set();
 const NOTIF_VIEW_ID = '__notifications__';
 
@@ -858,6 +902,13 @@ async function loadState() {
       darkMode = !!s.darkMode;
       gcalClientId = s.gcalClientId || '';
       gcalInject = !!s.gcalInject;
+      gcalEvents = Array.isArray(s.gcalEvents) ? s.gcalEvents : [];
+      gcalSnapshotTime = s.gcalSnapshotTime || 0;
+      fitInject = !!s.fitInject;
+      fitData = s.fitData || { heart: [], steps: [], sleep: [] };
+      fitSnapshotTime = s.fitSnapshotTime || 0;
+      proactiveConvIds = Array.isArray(s.proactiveConvIds) ? s.proactiveConvIds : [];
+      proactiveState = s.proactiveState || { lastCheckDate: '', dailyCounts: {} };
       notifications = Array.isArray(s.notifications) ? s.notifications : [];
       notifEnabled = !!s.notifEnabled;
       notifLeadMin = typeof s.notifLeadMin === 'number' ? s.notifLeadMin : 10;
@@ -876,6 +927,7 @@ async function loadState() {
     renderConvList();
     renderMessages();
     if (notifEnabled) startNotifTimer();
+    startProactiveTimer();
     // 自動嘗試靜默續期 Google Calendar token
     if (gcalClientId) {
       const tryAutoConnect = () => {
@@ -896,7 +948,8 @@ async function save() {
   try {
     await idbSet(SK, {
       apiKey, dsKey, oaiKey, charName, avatarB64, docs, instText, thinkingEnabled, searchEnabled,
-      darkMode, gcalClientId, gcalInject,
+      darkMode, gcalClientId, gcalInject, gcalEvents, gcalSnapshotTime,
+      fitInject, fitData, fitSnapshotTime, proactiveConvIds, proactiveState,
       notifications, notifEnabled, notifLeadMin, notifiedIds: Array.from(notifiedIds),
       conversations, currentConvId,
       model: document.getElementById('chat-model').value
@@ -1011,6 +1064,7 @@ function switchPage(target) {
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.target===target));
   if (target==='settings') fillSettingsPage();
   if (target==='home') initHome();
+  if (target==='extra') renderFitPage();
   if (target==='calendar') {
     renderGcalPage();
     if (gcalToken && Date.now() >= gcalTokenExpiry) ensureGcalToken().then(ok => { if (ok) fetchGcalEvents(); });
@@ -1029,7 +1083,7 @@ function initGcalClient() {
   try {
     gcalTokenClient = google.accounts.oauth2.initTokenClient({
       client_id: gcalClientId,
-      scope: 'https://www.googleapis.com/auth/calendar.readonly',
+      scope: 'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/fitness.activity.read https://www.googleapis.com/auth/fitness.heart_rate.read https://www.googleapis.com/auth/fitness.sleep.read',
       callback: (resp) => {
         if (resp.access_token) {
           gcalToken = resp.access_token;
@@ -1078,15 +1132,18 @@ async function fetchGcalEvents() {
   if (!gcalToken) return;
   const now = new Date();
   const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
-  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 7).toISOString();
-  const url = `https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${encodeURIComponent(start)}&timeMax=${encodeURIComponent(end)}&singleEvents=true&orderBy=startTime&maxResults=50`;
+  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 30).toISOString();
+  const url = `https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${encodeURIComponent(start)}&timeMax=${encodeURIComponent(end)}&singleEvents=true&orderBy=startTime&maxResults=250`;
   try {
     const res = await fetch(url, { headers: { 'Authorization': `Bearer ${gcalToken}` } });
     if (!res.ok) { console.error('gcal fetch failed', res.status); return; }
     const data = await res.json();
     gcalEvents = data.items || [];
+    gcalSnapshotTime = Date.now();
+    save(); // 存快照
     renderGcalPage();
     checkAndNotify();
+    fetchFitData(); // 同時抓健康資料
   } catch(e) { console.error('gcal fetch error', e); }
 }
 
@@ -1095,7 +1152,9 @@ function renderGcalPage() {
   const list = document.getElementById('cal-events');
   const refresh = document.getElementById('cal-refresh-btn');
   if (!empty || !list) return;
-  if (!gcalToken) {
+  // 只要有 events 快照，就顯示（不管有沒有 token）
+  const hasSnapshot = gcalEvents.length > 0 || gcalSnapshotTime > 0;
+  if (!hasSnapshot && !gcalToken) {
     empty.style.display = 'flex';
     list.style.display = 'none';
     refresh.style.display = 'none';
@@ -1105,7 +1164,8 @@ function renderGcalPage() {
   list.style.display = 'block';
   refresh.style.display = 'inline-block';
   if (!gcalEvents.length) {
-    list.innerHTML = '<div style="text-align:center;color:var(--text-dim);padding:40px 20px;font-size:13px">未來 7 天沒有行程</div>';
+    const bannerEmpty = gcalSnapshotTime ? `<div style="text-align:center;font-size:11px;color:var(--text-dim);padding:6px 0 10px;opacity:0.7">上次更新：${new Date(gcalSnapshotTime).toLocaleString('zh-TW', {timeZone:'Asia/Taipei', month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit', hour12:false})}</div>` : '';
+    list.innerHTML = bannerEmpty + '<div style="text-align:center;color:var(--text-dim);padding:40px 20px;font-size:13px">未來 30 天沒有行程</div>';
     return;
   }
   const groups = {};
@@ -1114,6 +1174,7 @@ function renderGcalPage() {
     const key = d.slice(0, 10);
     (groups[key] = groups[key] || []).push(ev);
   });
+  const snapshotBanner = gcalSnapshotTime ? `<div style="text-align:center;font-size:11px;color:var(--text-dim);padding:6px 0 10px;opacity:0.7">上次更新：${new Date(gcalSnapshotTime).toLocaleString('zh-TW', {timeZone:'Asia/Taipei', month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit', hour12:false})}</div>` : '';
   const html = Object.keys(groups).sort().map(dateKey => {
     const dt = new Date(dateKey + 'T00:00:00');
     const label = dt.toLocaleDateString('zh-TW', { month: 'long', day: 'numeric', weekday: 'short' });
@@ -1124,7 +1185,7 @@ function renderGcalPage() {
     }).join('');
     return `<div class="cal-day-hdr">${label}</div>${items}`;
   }).join('');
-  list.innerHTML = html;
+  list.innerHTML = snapshotBanner + html;
 }
 
 function buildGcalContext() {
@@ -1142,6 +1203,290 @@ function buildGcalContext() {
     return `- ${t}：${ev.summary || '（無標題）'}`;
   }).join('\n');
   return `[今日行程]\n${lines}\n[行程結束]`;
+}
+
+
+// ── Google Fit ──
+async function fetchFitData() {
+  if (!gcalToken) return;
+  const now = new Date();
+  const endMs = now.getTime();
+  const startMs = endMs - 5 * 24 * 60 * 60 * 1000;
+
+  try {
+    // 步數：按天聚合
+    const stepsRes = await fetch('https://www.googleapis.com/fitness/v1/users/me/dataset:aggregate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${gcalToken}` },
+      body: JSON.stringify({
+        aggregateBy: [{ dataTypeName: 'com.google.step_count.delta' }],
+        bucketByTime: { durationMillis: 86400000 },
+        startTimeMillis: startMs, endTimeMillis: endMs
+      })
+    });
+    if (stepsRes.ok) {
+      const d = await stepsRes.json();
+      fitData.steps = (d.bucket || []).map(b => ({
+        date: new Date(parseInt(b.startTimeMillis)).toISOString().slice(0, 10),
+        value: b.dataset[0]?.point?.reduce((s, p) => s + (p.value[0]?.intVal || 0), 0) || 0
+      }));
+    }
+
+    // 心率：按天聚合（平均、min、max）
+    const hrRes = await fetch('https://www.googleapis.com/fitness/v1/users/me/dataset:aggregate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${gcalToken}` },
+      body: JSON.stringify({
+        aggregateBy: [{ dataTypeName: 'com.google.heart_rate.bpm' }],
+        bucketByTime: { durationMillis: 86400000 },
+        startTimeMillis: startMs, endTimeMillis: endMs
+      })
+    });
+    if (hrRes.ok) {
+      const d = await hrRes.json();
+      fitData.heart = (d.bucket || []).map(b => {
+        const pt = b.dataset[0]?.point?.[0]?.value;
+        return {
+          date: new Date(parseInt(b.startTimeMillis)).toISOString().slice(0, 10),
+          avg: pt?.[0]?.fpVal ? Math.round(pt[0].fpVal) : null,
+          max: pt?.[1]?.fpVal ? Math.round(pt[1].fpVal) : null,
+          min: pt?.[2]?.fpVal ? Math.round(pt[2].fpVal) : null
+        };
+      });
+    }
+
+    // 睡眠：session
+    const sleepStart = new Date(startMs).toISOString();
+    const sleepEnd = new Date(endMs).toISOString();
+    const sleepRes = await fetch(`https://www.googleapis.com/fitness/v1/users/me/sessions?startTime=${encodeURIComponent(sleepStart)}&endTime=${encodeURIComponent(sleepEnd)}&activityType=72`, {
+      headers: { 'Authorization': `Bearer ${gcalToken}` }
+    });
+    if (sleepRes.ok) {
+      const d = await sleepRes.json();
+      fitData.sleep = (d.session || []).map(s => {
+        const start = new Date(parseInt(s.startTimeMillis));
+        const end = new Date(parseInt(s.endTimeMillis));
+        const durationMin = Math.round((end - start) / 60000);
+        return {
+          date: end.toISOString().slice(0, 10),
+          startTime: start.toLocaleTimeString('zh-TW', { timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit', hour12: false }),
+          endTime: end.toLocaleTimeString('zh-TW', { timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit', hour12: false }),
+          durationMin
+        };
+      });
+    }
+
+    fitSnapshotTime = Date.now();
+    save();
+    renderFitPage();
+  } catch(e) { console.error('fit fetch failed', e); }
+}
+
+function renderFitPage() {
+  const nc = document.getElementById('fit-not-connected');
+  const content = document.getElementById('fit-content');
+  if (!nc || !content) return;
+  const hasData = fitSnapshotTime > 0;
+  nc.style.display = hasData ? 'none' : 'block';
+  content.style.display = hasData ? 'block' : 'none';
+  if (!hasData) return;
+
+  // 心率
+  const heartBody = document.getElementById('fit-heart-body');
+  if (!fitData.heart.length || fitData.heart.every(h => !h.avg)) {
+    heartBody.innerHTML = '<div class="fit-empty">沒有心率資料</div>';
+  } else {
+    heartBody.innerHTML = fitData.heart.slice(-5).reverse().map(h => {
+      const label = new Date(h.date).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric', weekday: 'short' });
+      const val = h.avg ? `${h.min || '-'}~${h.max || '-'} / 平均 ${h.avg} bpm` : '無資料';
+      return `<div class="fit-row"><div class="fit-row-date">${label}</div><div class="fit-row-val">${val}</div></div>`;
+    }).join('');
+  }
+
+  // 步數
+  const stepsBody = document.getElementById('fit-steps-body');
+  if (!fitData.steps.length) {
+    stepsBody.innerHTML = '<div class="fit-empty">沒有步數資料</div>';
+  } else {
+    stepsBody.innerHTML = fitData.steps.slice(-5).reverse().map(s => {
+      const label = new Date(s.date).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric', weekday: 'short' });
+      return `<div class="fit-row"><div class="fit-row-date">${label}</div><div class="fit-row-val">${s.value.toLocaleString()} 步</div></div>`;
+    }).join('');
+  }
+
+  // 睡眠
+  const sleepBody = document.getElementById('fit-sleep-body');
+  if (!fitData.sleep.length) {
+    sleepBody.innerHTML = '<div class="fit-empty">沒有睡眠資料</div>';
+  } else {
+    sleepBody.innerHTML = fitData.sleep.slice(-5).reverse().map(s => {
+      const label = new Date(s.date).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric', weekday: 'short' });
+      const h = Math.floor(s.durationMin / 60), m = s.durationMin % 60;
+      return `<div class="fit-row"><div class="fit-row-date">${label}</div><div class="fit-row-val">${s.startTime} → ${s.endTime}<br><span style="font-size:11px;color:var(--text-dim)">共 ${h}h${m}m</span></div></div>`;
+    }).join('');
+  }
+}
+
+function buildFitContext() {
+  if (!fitInject) return '';
+  const today = new Date().toISOString().slice(0, 10);
+  const todaySteps = fitData.steps.find(s => s.date === today);
+  const todayHeart = fitData.heart.find(h => h.date === today);
+  const lastSleep = fitData.sleep.slice(-1)[0];
+  const parts = [];
+  if (todaySteps) parts.push(`- 今日步數：${todaySteps.value.toLocaleString()}`);
+  if (todayHeart && todayHeart.avg) parts.push(`- 今日心率：${todayHeart.min || '-'}~${todayHeart.max || '-'} bpm，平均 ${todayHeart.avg}`);
+  if (lastSleep) {
+    const h = Math.floor(lastSleep.durationMin / 60), m = lastSleep.durationMin % 60;
+    parts.push(`- 昨晚睡眠：${lastSleep.startTime} → ${lastSleep.endTime}（${h}h${m}m）`);
+  }
+  if (!parts.length) return '';
+  return `[今日健康]\n${parts.join('\n')}\n[結束]`;
+}
+
+// ── 主動訊息 ──
+function renderProactiveList() {
+  const list = document.getElementById('pg-proactive-list');
+  if (!list) return;
+  const realConvs = conversations.filter(c => c.id !== NOTIF_VIEW_ID);
+  if (!realConvs.length) {
+    list.innerHTML = '<div style="font-size:12px;color:var(--text-dim);text-align:center;padding:12px">還沒有任何對話</div>';
+    return;
+  }
+  list.innerHTML = realConvs.map(cv => {
+    const checked = proactiveConvIds.includes(cv.id) ? 'checked' : '';
+    return `<label style="display:flex;align-items:center;gap:8px;padding:8px 0;cursor:pointer;border-bottom:1px solid var(--border)">
+      <input type="checkbox" data-conv-id="${cv.id}" ${checked} class="pg-proactive-cb" style="width:18px;height:18px;cursor:pointer">
+      <span style="font-size:13px">${escHtml(cv.name || '未命名')}</span>
+    </label>`;
+  }).join('');
+  list.querySelectorAll('.pg-proactive-cb').forEach(cb => {
+    cb.addEventListener('change', e => {
+      const id = e.target.dataset.convId;
+      if (e.target.checked) {
+        if (!proactiveConvIds.includes(id)) proactiveConvIds.push(id);
+      } else {
+        proactiveConvIds = proactiveConvIds.filter(x => x !== id);
+      }
+      save();
+    });
+  });
+}
+
+async function checkProactive() {
+  if (!proactiveConvIds.length) return;
+  const now = new Date();
+  const hour = now.getHours();
+  if (hour < 9 || hour >= 21) return; // 只在 09:00~21:00
+  const todayKey = now.toISOString().slice(0, 10);
+
+  // 每日重置計數
+  if (proactiveState.lastCheckDate !== todayKey) {
+    proactiveState.dailyCounts = {};
+    proactiveState.lastCheckDate = todayKey;
+  }
+
+  for (const convId of proactiveConvIds) {
+    const conv = conversations.find(c => c.id === convId);
+    if (!conv || !conv.history.length) continue;
+    // 每日上限 2 則
+    if ((proactiveState.dailyCounts[convId] || 0) >= 2) continue;
+    // 找最後一則有 _time 的訊息
+    const lastMsg = [...conv.history].reverse().find(m => m._time);
+    if (!lastMsg || !lastMsg._time) continue;
+    // 若最後一則是 assistant，代表上次是模型主動說話（等你回覆），暫停
+    if (conv.history[conv.history.length - 1].role === 'assistant') {
+      const lastActual = conv.history[conv.history.length - 1];
+      // 若這則 assistant 有 _proactive 標記，代表未回覆狀態
+      if (lastActual._proactive) continue;
+    }
+    // 解析上次時間（_time 格式：2026年7月5日週日 15:30）
+    const lastMsgTs = parseTwTime(lastMsg._time);
+    if (!lastMsgTs) continue;
+    const diffMs = now.getTime() - lastMsgTs;
+    if (diffMs < 3 * 60 * 60 * 1000) continue; // 未滿 3 小時
+
+    // 觸發！
+    await generateProactive(conv);
+    proactiveState.dailyCounts[convId] = (proactiveState.dailyCounts[convId] || 0) + 1;
+    save();
+  }
+}
+
+function parseTwTime(str) {
+  // 「2026年7月5日週日 15:30」→ Date
+  const m = str.match(/(\d+)年(\d+)月(\d+)日.*?(\d+):(\d+)/);
+  if (!m) return null;
+  return new Date(+m[1], +m[2]-1, +m[3], +m[4], +m[5]).getTime();
+}
+
+async function generateProactive(conv) {
+  const model = conv.model || document.getElementById('chat-model').value;
+  const useDS = isDeepSeek(model);
+  const useOAI = isOpenAI(model);
+  const key = getKey(model);
+  if (!key) return;
+  const sys = buildSystem();
+  const userPrompt = `距離用戶上次互動已經超過 3 小時，請以角色身份主動傳一則簡短適中（30-100字）的訊息給用戶，可以是關心、閒聊或分享。`;
+
+  const apiMessages = conv.history.filter(m => !m._notice).map(m => {
+    if (Array.isArray(m.content)) {
+      const filtered = m.content.filter(b => b.type !== 'thinking');
+      return { role: m.role, content: filtered.length===1 && filtered[0].type==='text' ? filtered[0].text : filtered };
+    }
+    return { role: m.role, content: m.content };
+  });
+  apiMessages.push({ role: 'user', content: userPrompt });
+
+  try {
+    let body, headers, url, reply = '';
+    if (useDS) {
+      body = { model, max_tokens: 400, messages: [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages] };
+      headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
+      url = 'https://api.deepseek.com/chat/completions';
+      const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
+      if (!res.ok) return;
+      const d = await res.json();
+      reply = d.choices?.[0]?.message?.content || '';
+    } else if (useOAI) {
+      body = { model, max_tokens: 400, messages: [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages] };
+      headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
+      url = 'https://api.openai.com/v1/chat/completions';
+      const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
+      if (!res.ok) return;
+      const d = await res.json();
+      reply = d.choices?.[0]?.message?.content || '';
+    } else {
+      body = { model, max_tokens: 400, system: sys || undefined, messages: apiMessages };
+      headers = { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' };
+      url = 'https://api.anthropic.com/v1/messages';
+      const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
+      if (!res.ok) return;
+      const d = await res.json();
+      reply = d.content?.find(b => b.type==='text')?.text || '';
+    }
+    if (!reply) return;
+    const time = nowTW();
+    conv.history.push({ role: 'assistant', content: reply, _time: time, _proactive: true });
+    save();
+    // 若當前正在顯示這對話，更新畫面
+    if (currentConvId === conv.id) renderMessages();
+    // 系統通知
+    if ('Notification' in window && Notification.permission === 'granted') {
+      try {
+        new Notification(conv.name || charName || '訊息', { body: reply.slice(0, 120), icon: avatarB64 || undefined });
+      } catch(e) {}
+    }
+    // 觸發壓縮判斷（若對話累積夠了）
+    if (currentConvId === conv.id) await maybeCompress();
+  } catch(e) { console.error('proactive gen failed', e); }
+}
+
+// 每 30 分鐘檢查一次主動訊息
+function startProactiveTimer() {
+  if (proactiveTimer) clearInterval(proactiveTimer);
+  checkProactive();
+  proactiveTimer = setInterval(checkProactive, 30 * 60 * 1000);
 }
 
 // ── 通知系統 ──
@@ -1294,6 +1639,8 @@ function fillSettingsPage() {
   document.getElementById('pg-gcal-inject').checked = gcalInject;
   document.getElementById('pg-gcal-disconnect').style.display = gcalToken ? 'block' : 'none';
   document.getElementById('pg-notif-toggle').checked = notifEnabled;
+  document.getElementById('pg-fit-inject').checked = fitInject;
+  renderProactiveList();
   document.getElementById('pg-claude-key').value = apiKey || '';
   document.getElementById('pg-ds-key').value = dsKey || '';
   document.getElementById('pg-oai-key').value = oaiKey || '';
@@ -1323,6 +1670,10 @@ document.getElementById('pg-gcal-inject').addEventListener('change', e=>{
   gcalInject = e.target.checked;
   save();
 });
+document.getElementById('pg-fit-inject').addEventListener('change', e=>{
+  fitInject = e.target.checked;
+  save();
+});
 document.getElementById('pg-gcal-disconnect').addEventListener('click', ()=>{
   if (confirm('中斷 Google 行事曆連接？')) gcalDisconnect();
 });
@@ -1335,7 +1686,8 @@ document.getElementById('pg-notif-toggle').addEventListener('change', e=>{
 });
 
 document.getElementById('cal-refresh-btn').addEventListener('click', ()=>{
-  ensureGcalToken().then(ok => { if (ok) fetchGcalEvents(); });
+  // 重新登入以拿新快照（因為 token 過期後靜默續期可能無效）
+  gcalConnect();
 });
 
 // 設定頁：儲存
@@ -1446,6 +1798,14 @@ function renderConvList() {
 function switchConv(id) {
   currentConvId=id;
   updateNotifViewClass();
+  // 套用該對話儲存的模型（若有）
+  const conv = currentConv();
+  if (conv && conv.model) {
+    const modelEl = document.getElementById('chat-model');
+    if (modelEl) modelEl.value = conv.model;
+    updateThinkBtn();
+    updateSearchBtn();
+  }
   save(); renderConvList(); renderMessages();
   closeSidebar();
 }
@@ -1465,7 +1825,8 @@ document.getElementById('sidebar-overlay').addEventListener('click', closeSideba
 
 document.getElementById('new-conv-btn').addEventListener('click', () => {
   const num = conversations.length+1;
-  const conv = { id:uid(), name:`對話 ${num}`, history:[] };
+  const currentModel = document.getElementById('chat-model').value;
+  const conv = { id:uid(), name:`對話 ${num}`, history:[], model: currentModel };
   conversations.push(conv);
   currentConvId=conv.id;
   save(); renderConvList(); renderMessages(); closeSidebar();
@@ -1729,6 +2090,9 @@ async function send() {
   } else { content=text; }
 
   const userTime = nowTW();
+  // 若最後一則是 proactive，清掉標記代表已回覆
+  const lastAsst = conv.history[conv.history.length - 1];
+  if (lastAsst && lastAsst._proactive) delete lastAsst._proactive;
   conv.history.push({role:'user',content,_time:userTime});
   const userIdx=conv.history.length-1;
   addBubble('user',text,false,extra,null,userIdx,userTime);
@@ -1756,7 +2120,8 @@ async function send() {
     if (_lastUserIdx >= 0) {
       const _um = apiMessages[_lastUserIdx];
       const _gcalCtx = buildGcalContext();
-      const _tp = `[當前台灣時間：${_apiTwTime}]${_gcalCtx ? '\n' + _gcalCtx : ''}\n`;
+      const _fitCtx = buildFitContext();
+      const _tp = `[當前台灣時間：${_apiTwTime}]${_gcalCtx ? '\n' + _gcalCtx : ''}${_fitCtx ? '\n' + _fitCtx : ''}\n`;
       if (typeof _um.content === 'string') {
         apiMessages[_lastUserIdx] = { ..._um, content: _tp + _um.content };
       } else if (Array.isArray(_um.content)) {
@@ -1994,7 +2359,8 @@ async function regenerateFrom(historyIdx) {
     if (_lastUserIdx >= 0) {
       const _um = apiMessages[_lastUserIdx];
       const _gcalCtx = buildGcalContext();
-      const _tp = `[當前台灣時間：${_apiTwTime}]${_gcalCtx ? '\n' + _gcalCtx : ''}\n`;
+      const _fitCtx = buildFitContext();
+      const _tp = `[當前台灣時間：${_apiTwTime}]${_gcalCtx ? '\n' + _gcalCtx : ''}${_fitCtx ? '\n' + _fitCtx : ''}\n`;
       if (typeof _um.content === 'string') {
         apiMessages[_lastUserIdx] = { ..._um, content: _tp + _um.content };
       } else if (Array.isArray(_um.content)) {
