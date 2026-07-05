@@ -2054,19 +2054,36 @@ async function regenerateAssistantMsg() {
     const key = getKey(model);
 
     const apiMessages = msgHistory.map(m => {
-      if (Array.isArray(m.content)) {
-        const filtered = m.content.filter(b => b.type !== 'thinking');
-        if (useOAI) {
-          const parts = filtered.map(b => {
-            if (b.type === 'text') return { type: 'text', text: b.text };
-            if (b.type === 'image') return { type: 'image_url', image_url: { url: `data:${b.source.media_type};base64,${b.source.data}` } };
-            return null;
-          }).filter(Boolean);
-          return { role: m.role, content: parts.length === 1 && parts[0].type === 'text' ? parts[0].text : parts };
+      if (typeof m.content === 'string') return { role: m.role, content: m.content };
+      if (!Array.isArray(m.content)) return { role: m.role, content: '' };
+      const filtered = m.content.filter(b => b.type !== 'thinking');
+      const textParts = [];
+      const imageParts = [];
+      filtered.forEach(b => {
+        if (b.type === 'text') textParts.push(b.text);
+        else if (b.type === 'image' && b.source) imageParts.push({ mime: b.source.media_type, data: b.source.data });
+        else if (b.type === 'image_url' && b.image_url?.url) {
+          const m2 = b.image_url.url.match(/^data:([^;]+);base64,(.+)$/);
+          if (m2) imageParts.push({ mime: m2[1], data: m2[2] });
         }
-        return { role: m.role, content: filtered.length===1 && filtered[0].type==='text' ? filtered[0].text : filtered };
+      });
+      const combinedText = textParts.join('');
+      if (useOAI) {
+        const parts = [];
+        if (combinedText) parts.push({ type: 'text', text: combinedText });
+        imageParts.forEach(img => parts.push({ type: 'image_url', image_url: { url: `data:${img.mime};base64,${img.data}` } }));
+        return { role: m.role, content: parts.length === 1 && parts[0].type === 'text' ? parts[0].text : parts };
+      } else if (useDS) {
+        let text = combinedText;
+        if (imageParts.length && !text) text = '[圖片]';
+        else if (imageParts.length) text = text + ` [${imageParts.length} 張圖片]`;
+        return { role: m.role, content: text };
+      } else {
+        const parts = [];
+        if (combinedText) parts.push({ type: 'text', text: combinedText });
+        imageParts.forEach(img => parts.push({ type: 'image', source: { type: 'base64', media_type: img.mime, data: img.data } }));
+        return { role: m.role, content: parts.length === 1 && parts[0].type === 'text' ? parts[0].text : parts };
       }
-      return { role: m.role, content: m.content };
     });
 
     // 時間注入
@@ -2213,20 +2230,40 @@ async function sendMsg() {
     const key = getKey(model);
 
     const apiMessages = msgHistory.map(m => {
-      if (Array.isArray(m.content)) {
-        const filtered = m.content.filter(b => b.type !== 'thinking');
-        if (useOAI) {
-          // OpenAI 需要把 image/document 轉成 image_url 格式
-          const parts = filtered.map(b => {
-            if (b.type === 'text') return { type: 'text', text: b.text };
-            if (b.type === 'image') return { type: 'image_url', image_url: { url: `data:${b.source.media_type};base64,${b.source.data}` } };
-            return null;
-          }).filter(Boolean);
-          return { role: m.role, content: parts.length === 1 && parts[0].type === 'text' ? parts[0].text : parts };
+      if (typeof m.content === 'string') return { role: m.role, content: m.content };
+      if (!Array.isArray(m.content)) return { role: m.role, content: '' };
+      // 從各種可能的格式中提取「純文字」和「圖片」
+      const filtered = m.content.filter(b => b.type !== 'thinking');
+      const textParts = [];
+      const imageParts = []; // { mime, data } 統一格式
+      filtered.forEach(b => {
+        if (b.type === 'text') textParts.push(b.text);
+        else if (b.type === 'image' && b.source) imageParts.push({ mime: b.source.media_type, data: b.source.data });
+        else if (b.type === 'image_url' && b.image_url?.url) {
+          const m2 = b.image_url.url.match(/^data:([^;]+);base64,(.+)$/);
+          if (m2) imageParts.push({ mime: m2[1], data: m2[2] });
         }
-        return { role: m.role, content: filtered.length===1 && filtered[0].type==='text' ? filtered[0].text : filtered };
+      });
+      const combinedText = textParts.join('');
+      // 根據目標模型組裝
+      if (useOAI) {
+        const parts = [];
+        if (combinedText) parts.push({ type: 'text', text: combinedText });
+        imageParts.forEach(img => parts.push({ type: 'image_url', image_url: { url: `data:${img.mime};base64,${img.data}` } }));
+        return { role: m.role, content: parts.length === 1 && parts[0].type === 'text' ? parts[0].text : parts };
+      } else if (useDS) {
+        // DS 不支援圖片，只保留文字（如果有圖片，加註記提醒）
+        let text = combinedText;
+        if (imageParts.length && !text) text = '[圖片]';
+        else if (imageParts.length) text = text + ` [${imageParts.length} 張圖片]`;
+        return { role: m.role, content: text };
+      } else {
+        // Claude 格式
+        const parts = [];
+        if (combinedText) parts.push({ type: 'text', text: combinedText });
+        imageParts.forEach(img => parts.push({ type: 'image', source: { type: 'base64', media_type: img.mime, data: img.data } }));
+        return { role: m.role, content: parts.length === 1 && parts[0].type === 'text' ? parts[0].text : parts };
       }
-      return { role: m.role, content: m.content };
     });
 
     // 時間注入
