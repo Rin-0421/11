@@ -187,6 +187,22 @@ body.notif-view .chat-header .think-toggle,
 body.notif-view .chat-header #search-toggle,
 body.notif-view .chat-header .hdr-select { display: none; }
 
+/* 對話紀錄 */
+.msg-archive-item { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin-bottom: 8px; display: flex; align-items: center; gap: 10px; cursor: pointer; }
+.msg-archive-body { flex: 1; min-width: 0; }
+.msg-archive-title { font-size: 13px; color: var(--text); }
+.msg-archive-meta { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+.msg-archive-del { background: none; border: none; color: var(--text-dim); font-size: 16px; cursor: pointer; padding: 4px 8px; border-radius: 4px; }
+.msg-archive-del:hover { color: var(--danger); }
+.msg-empty-hint { text-align: center; color: var(--text-dim); padding: 20px; font-size: 12px; }
+
+/* 對話紀錄檢視 Modal */
+#msg-view-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.85); z-index: 200; align-items: center; justify-content: center; padding: 20px; }
+#msg-view-modal.open { display: flex; }
+.msg-view-sheet { background: var(--bg); border: 1px solid var(--border); border-radius: 14px; max-width: 500px; width: 100%; max-height: 80vh; display: flex; flex-direction: column; overflow: hidden; }
+.msg-view-hdr { padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+.msg-view-body { padding: 12px 16px; overflow-y: auto; flex: 1; }
+
 /* 其他頁：section 標題 */
 .section-title { font-size: 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: .08em; margin: 4px 4px 10px; font-weight: 600; }
 
@@ -377,6 +393,22 @@ details[open] .fit-summary::before { transform: rotate(90deg); }
 }
 .msg-row.assistant .msg-time {
   padding-left: 2px;
+}
+/* 對話模式：assistant 恢復氣泡樣式 */
+.msg-row.msg-mode.assistant .bubble {
+  background: var(--ai-bubble, var(--surface));
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  border-bottom-left-radius: 4px;
+  padding: 9px 13px;
+}
+.msg-row.msg-mode.assistant .msg-col {
+  max-width: 74%;
+  width: auto;
+}
+.msg-row.msg-mode.assistant .msg-time {
+  padding-left: 0;
+  text-align: right;
 }
 .msg-row.user .bubble { background: var(--user-bubble); border-bottom-right-radius: 4px; }
 .bubble.typing { color: var(--text-dim); font-style: italic; }
@@ -571,9 +603,38 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
   </div>
 </div>
 
+<!-- 對話頁（訊息模式） -->
+<div id="page-messages" class="page" data-page="messages">
+  <div class="chat-header" style="justify-content:space-between">
+    <div style="display:flex;align-items:center;gap:8px">
+      <div class="hdr-av" id="msg-hdr-av"><span id="msg-hdr-av-ph">🎭</span><img id="msg-hdr-av-img" style="display:none"></div>
+      <div class="hdr-name" id="msg-hdr-name">角色</div>
+    </div>
+    <button class="btn-sm" id="msg-end-btn">結束對話</button>
+  </div>
+  <div id="messages-msg" class="messages"></div>
+  <div class="input-area">
+    <div id="msg-file-preview"></div>
+    <div class="input-row">
+      <button class="attach-btn" id="msg-attach-btn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+      </button>
+      <input type="file" id="msg-file-input" accept="image/*,.pdf" multiple style="display:none">
+      <textarea id="msg-user-input" class="user-input" placeholder="輸入訊息…" rows="1"></textarea>
+      <button class="send-btn" id="msg-send-btn">
+        <svg id="msg-send-icon" viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+        <svg id="msg-stop-icon" viewBox="0 0 24 24" style="display:none"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+      </button>
+    </div>
+  </div>
+</div>
+
 <!-- 設定頁 -->
 <div id="page-settings" class="page" data-page="settings">
-  <div class="page-hdr">設定</div>
+  <div class="page-hdr" style="display:flex;justify-content:space-between;align-items:center">
+    <span>設定</span>
+    <button class="btn-sm" id="pg-save-btn-top" style="font-weight:600">儲存</button>
+  </div>
   <div class="page-body" id="settings-page-body">
     <div class="card" style="max-width:none">
       <div class="card-title">外觀</div>
@@ -639,8 +700,14 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
       </div>
     </div>
     <div class="card" style="max-width:none">
-      <div class="card-title">自訂指令</div>
-      <textarea class="ftextarea" id="pg-inst" style="min-height:96px" placeholder="給 AI 的行為規則…"></textarea>
+      <div class="card-title">主頁指令</div>
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px">用於「主頁」的 RP 對戲模式</div>
+      <textarea class="ftextarea" id="pg-inst" style="min-height:96px" placeholder="給 AI 的行為規則（RP 對戲模式）…"></textarea>
+    </div>
+    <div class="card" style="max-width:none">
+      <div class="card-title">對話指令</div>
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px">用於「對話」的訊息模式</div>
+      <textarea class="ftextarea" id="pg-inst-msg" style="min-height:96px" placeholder="給 AI 的行為規則（訊息模式）…"></textarea>
     </div>
     <div class="card" style="max-width:none">
       <div class="card-title">主動訊息</div>
@@ -649,7 +716,6 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
       </div>
       <div id="pg-proactive-list"></div>
     </div>
-    <button class="btn-primary" id="pg-save-btn">儲存設定</button>
     <div class="card" style="max-width:none;margin-top:12px">
       <div class="card-title">匯出／匯入</div>
       <div class="io-row" style="display:flex;gap:8px;flex-wrap:wrap">
@@ -686,7 +752,9 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
 <div id="page-extra" class="page" data-page="extra">
   <div class="page-hdr">其他</div>
   <div class="page-body">
-    <div class="section-title">健康</div>
+    <div class="section-title">對話紀錄</div>
+    <div id="msg-archives-list"></div>
+    <div class="section-title" style="margin-top:20px">健康</div>
     <div id="fit-not-connected" style="display:none;color:var(--text-dim);text-align:center;padding:20px;font-size:13px">
       需先在行事曆頁連接 Google 才能顯示健康資料
     </div>
@@ -712,6 +780,10 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
   <button class="nav-btn active" data-target="home">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
     <span class="nav-label">主頁</span>
+  </button>
+  <button class="nav-btn" data-target="messages">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+    <span class="nav-label">對話</span>
   </button>
   <button class="nav-btn" data-target="settings">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -826,6 +898,7 @@ let gcalClientId = '', gcalToken = null, gcalTokenExpiry = 0, gcalInject = false
 let fitInject = false, fitData = { heart: [], steps: [], sleep: [] }, fitSnapshotTime = 0;
 let proactiveConvIds = [], proactiveState = { lastCheckDate: '', dailyCounts: {} }, proactiveTimer = null;
 let notifications = [], notifEnabled = false, notifLeadMin = 10, notifCheckTimer = null, notifiedIds = new Set();
+let instTextMsg = '', msgHistory = [], msgArchives = [], msgPendingFiles = [];
 const NOTIF_VIEW_ID = '__notifications__';
 
 const COMPRESS_THRESHOLD = 50;
@@ -913,6 +986,9 @@ async function loadState() {
       notifEnabled = !!s.notifEnabled;
       notifLeadMin = typeof s.notifLeadMin === 'number' ? s.notifLeadMin : 10;
       notifiedIds = new Set(s.notifiedIds || []);
+      instTextMsg = s.instTextMsg || '';
+      msgHistory = Array.isArray(s.msgHistory) ? s.msgHistory : [];
+      msgArchives = Array.isArray(s.msgArchives) ? s.msgArchives : [];
       applyDarkMode();
       conversations = s.conversations || [];
       currentConvId = s.currentConvId || null;
@@ -951,6 +1027,7 @@ async function save() {
       darkMode, gcalClientId, gcalInject, gcalEvents, gcalSnapshotTime,
       fitInject, fitData, fitSnapshotTime, proactiveConvIds, proactiveState,
       notifications, notifEnabled, notifLeadMin, notifiedIds: Array.from(notifiedIds),
+      instTextMsg, msgHistory, msgArchives,
       conversations, currentConvId,
       model: document.getElementById('chat-model').value
     });
@@ -1064,7 +1141,12 @@ function switchPage(target) {
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.target===target));
   if (target==='settings') fillSettingsPage();
   if (target==='home') initHome();
-  if (target==='extra') renderFitPage();
+  if (target==='messages') {
+    document.getElementById('msg-hdr-name').textContent = charName || '角色';
+    setAv('msg-hdr-av-img','msg-hdr-av-ph',avatarB64);
+    renderMsgPage();
+  }
+  if (target==='extra') { renderFitPage(); renderMsgArchives(); }
   if (target==='calendar') {
     // 只顯示快照，不自動登入。要更新請按重新整理
     renderGcalPage();
@@ -1680,6 +1762,335 @@ function requestNotifPermission() {
   }
 }
 
+
+// ── 對話頁（訊息模式）──
+function renderMsgPage() {
+  const el = document.getElementById('messages-msg');
+  if (!el) return;
+  el.innerHTML = '';
+  if (!msgHistory.length) {
+    const empty = document.createElement('div');
+    empty.className = 'msg-empty-hint';
+    empty.style.padding = '40px 20px';
+    empty.textContent = '和角色開始對話…';
+    el.appendChild(empty);
+    return;
+  }
+  msgHistory.forEach((m, i) => {
+    const row = document.createElement('div');
+    row.className = `msg-row ${m.role} msg-mode`;  // msg-mode 讓 CSS 恢復氣泡
+    // Assistant 加頭像
+    if (m.role === 'assistant') {
+      const av = document.createElement('div');
+      av.className = 'msg-av';
+      if (avatarB64) { const i2 = document.createElement('img'); i2.src = avatarB64; av.appendChild(i2); } else av.textContent = '🎭';
+      row.appendChild(av);
+    }
+    const col = document.createElement('div');
+    col.className = 'msg-col';
+    // Assistant 加名字
+    if (m.role === 'assistant') {
+      const nm = document.createElement('div');
+      nm.className = 'msg-name';
+      nm.textContent = charName || '角色';
+      col.appendChild(nm);
+    }
+    const bbl = document.createElement('div');
+    bbl.className = 'bubble';
+    // 處理圖片附件
+    if (Array.isArray(m.content)) {
+      const imgs = m.content.filter(b => b.type === 'image');
+      if (imgs.length) {
+        const grid = document.createElement('div');
+        grid.className = 'msg-img-grid';
+        imgs.forEach(img => {
+          const el2 = document.createElement('img');
+          el2.src = `data:${img.source.media_type};base64,${img.source.data}`;
+          el2.className = 'msg-img';
+          grid.appendChild(el2);
+        });
+        bbl.appendChild(grid);
+      }
+    }
+    const sp = document.createElement('span');
+    sp.className = 'bt';
+    const text = typeof m.content === 'string' ? m.content
+      : (m.content.find(b => b.type === 'text')?.text || '');
+    renderBt(sp, text);
+    bbl.appendChild(sp);
+    if (m._time) {
+      const t = document.createElement('span');
+      t.className = 'msg-time';
+      t.textContent = m._time;
+      bbl.appendChild(t);
+    }
+    col.appendChild(bbl);
+    row.appendChild(col);
+    el.appendChild(row);
+  });
+  el.scrollTop = el.scrollHeight;
+}
+
+async function sendMsg() {
+  const ui = document.getElementById('msg-user-input');
+  const text = ui.value.trim();
+  if ((!text && !msgPendingFiles.length) || isLoading) return;
+  isLoading = true;
+  abortCtrl = new AbortController();
+  document.getElementById('msg-send-icon').style.display = 'none';
+  document.getElementById('msg-stop-icon').style.display = '';
+  ui.value = ''; ui.style.height = 'auto';
+
+  let content, extra = null;
+  if (msgPendingFiles.length) {
+    content = [];
+    extra = [];
+    msgPendingFiles.forEach(pf => {
+      if (pf.type === 'image') {
+        content.push({type:'image',source:{type:'base64',media_type:pf.mime,data:pf.data}});
+        extra.push({type:'image',src:pf.src});
+      } else {
+        content.push({type:'document',source:{type:'base64',media_type:pf.mime,data:pf.data}});
+        extra.push({type:'pdf',name:pf.name});
+      }
+    });
+    if (text) content.push({type:'text',text});
+    msgPendingFiles = []; document.getElementById('msg-file-preview').innerHTML = ''; document.getElementById('msg-file-preview').style.display='none';
+  } else {
+    content = text;
+  }
+
+  const userTime = nowTW();
+  msgHistory.push({ role: 'user', content, _time: userTime });
+  save(); renderMsgPage();
+
+  try {
+    const model = document.getElementById('chat-model').value;
+    // 用訊息模式的 system prompt
+    const sysParts = [];
+    if (docs.length) { sysParts.push('[知識文件]'); docs.forEach(d=>sysParts.push(`## ${d.name}\n${d.content}`)); }
+    if (instTextMsg) sysParts.push('[指令]\n' + instTextMsg);
+    sysParts.push('每則用戶訊息的開頭包含當前台灣時間，請以該時間為準，不得自行估算或編造時間。');
+    const sys = sysParts.join('\n\n');
+
+    const apiMessages = msgHistory.map(m => {
+      if (Array.isArray(m.content)) {
+        const filtered = m.content.filter(b => b.type !== 'thinking');
+        return { role: m.role, content: filtered.length===1 && filtered[0].type==='text' ? filtered[0].text : filtered };
+      }
+      return { role: m.role, content: m.content };
+    });
+
+    // 時間注入
+    const _apiTwTime = new Date().toLocaleString('zh-TW', {timeZone:'Asia/Taipei', year:'numeric', month:'long', day:'numeric', weekday:'short', hour:'2-digit', minute:'2-digit', hour12:false});
+    const _lastUserIdx = apiMessages.map(m=>m.role).lastIndexOf('user');
+    if (_lastUserIdx >= 0) {
+      const _um = apiMessages[_lastUserIdx];
+      const _gcalCtx = buildGcalContext();
+      const _fitCtx = buildFitContext();
+      const _tp = `[當前台灣時間：${_apiTwTime}]${_gcalCtx ? '\n' + _gcalCtx : ''}${_fitCtx ? '\n' + _fitCtx : ''}\n`;
+      if (typeof _um.content === 'string') {
+        apiMessages[_lastUserIdx] = { ..._um, content: _tp + _um.content };
+      } else if (Array.isArray(_um.content)) {
+        const _nc = _um.content.map(b => b.type==='text' ? {...b, text: _tp + b.text} : b);
+        if (!_nc.some(b=>b.type==='text')) _nc.unshift({type:'text', text: _tp});
+        apiMessages[_lastUserIdx] = { ..._um, content: _nc };
+      }
+    }
+
+    const useDS = isDeepSeek(model);
+    const useOAI = isOpenAI(model);
+    const key = getKey(model);
+    let body, headers, url, reply = '';
+
+    if (useDS) {
+      body = { model, max_tokens: thinkingEnabled ? 8000 : 2048, stream: true, messages: [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages] };
+      headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
+      url = 'https://api.deepseek.com/chat/completions';
+    } else if (useOAI) {
+      body = { model, max_tokens: 2048, stream: true, messages: [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages] };
+      headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
+      url = 'https://api.openai.com/v1/chat/completions';
+    } else {
+      body = { model, max_tokens: thinkingEnabled ? 16000 : 2048, stream: true, system: sys || undefined, messages: apiMessages };
+      if (thinkingEnabled) body.thinking = model==='claude-opus-4-7' ? { type:'adaptive' } : { type:'enabled', budget_tokens:10000 };
+      headers = { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true', 'anthropic-beta': 'interleaved-thinking-2025-05-14' };
+      url = 'https://api.anthropic.com/v1/messages';
+    }
+
+    const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal: abortCtrl.signal });
+    if (!res.ok) { throw new Error('HTTP ' + res.status); }
+
+    // 建立空 assistant 氣泡開始 streaming
+    const asstMsg = { role: 'assistant', content: '', _time: nowTW() };
+    msgHistory.push(asstMsg);
+    renderMsgPage();
+    // 抓到最後一個 msg-row 的 .bt（就是剛加的 assistant 那個）
+    const allRows = document.querySelectorAll('#messages-msg .msg-row');
+    const lastRow = allRows[allRows.length - 1]?.querySelector('.bt');
+
+    const { reply: finalReply } = await doStream(res, useDS, useOAI,
+      (chunk) => { /* thinking 略過 */ },
+      (chunk) => {
+        asstMsg.content += chunk;
+        if (lastRow) renderBt(lastRow, asstMsg.content);
+        const scEl = document.getElementById('messages-msg');
+        if (scEl) scEl.scrollTop = scEl.scrollHeight;
+      }
+    );
+    asstMsg.content = finalReply;
+    save();
+    renderMsgPage();
+  } catch(e) {
+    if (e.name !== 'AbortError') {
+      msgHistory.push({ role: 'assistant', content: '⚠ 錯誤：' + e.message, _time: nowTW() });
+      renderMsgPage();
+    }
+  }
+
+  isLoading = false; abortCtrl = null;
+  document.getElementById('msg-send-icon').style.display = '';
+  document.getElementById('msg-stop-icon').style.display = 'none';
+}
+
+function endMsgConversation() {
+  if (!msgHistory.length) { alert('目前沒有對話可以結束'); return; }
+  if (!confirm('結束對話並封存？結束後這段對話會移到「其他」的對話紀錄，模型將不再看見。')) return;
+  msgArchives.push({
+    id: Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+    startTime: msgHistory[0]?._time || nowTW(),
+    endTime: msgHistory[msgHistory.length-1]?._time || nowTW(),
+    count: msgHistory.length,
+    history: msgHistory
+  });
+  msgHistory = [];
+  save();
+  renderMsgPage();
+  renderMsgArchives();
+}
+
+function renderMsgArchives() {
+  const list = document.getElementById('msg-archives-list');
+  if (!list) return;
+  if (!msgArchives.length) {
+    list.innerHTML = '<div class="msg-empty-hint">還沒有封存的對話</div>';
+    return;
+  }
+  list.innerHTML = '';
+  [...msgArchives].reverse().forEach(a => {
+    const item = document.createElement('div');
+    item.className = 'msg-archive-item';
+    item.innerHTML = `<div class="msg-archive-body">
+      <div class="msg-archive-title">${escHtml(a.startTime)} 起</div>
+      <div class="msg-archive-meta">共 ${a.count} 則訊息</div>
+    </div>
+    <button class="msg-archive-del" data-id="${a.id}" title="刪除">✕</button>`;
+    item.addEventListener('click', (e) => {
+      if (e.target.classList.contains('msg-archive-del')) return;
+      openMsgArchiveView(a);
+    });
+    item.querySelector('.msg-archive-del').addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (confirm('刪除這段對話紀錄？此動作無法復原。')) {
+        msgArchives = msgArchives.filter(x => x.id !== a.id);
+        save(); renderMsgArchives();
+      }
+    });
+    list.appendChild(item);
+  });
+}
+
+function openMsgArchiveView(archive) {
+  const modal = document.getElementById('msg-view-modal');
+  const body = document.getElementById('msg-view-body');
+  document.getElementById('msg-view-title').textContent = `${archive.startTime} 的對話`;
+  body.innerHTML = '';
+  archive.history.forEach(m => {
+    const row = document.createElement('div');
+    row.className = `msg-row ${m.role}`;
+    row.style.marginBottom = '8px';
+    const col = document.createElement('div');
+    col.className = 'msg-col';
+    const bbl = document.createElement('div');
+    bbl.className = 'bubble';
+    const sp = document.createElement('span');
+    sp.className = 'bt';
+    const text = typeof m.content === 'string' ? m.content
+      : (m.content.find(b => b.type === 'text')?.text || '');
+    renderBt(sp, text);
+    bbl.appendChild(sp);
+    if (m._time) {
+      const t = document.createElement('span');
+      t.className = 'msg-time';
+      t.textContent = m._time;
+      bbl.appendChild(t);
+    }
+    col.appendChild(bbl);
+    row.appendChild(col);
+    body.appendChild(row);
+  });
+  modal.classList.add('open');
+}
+
+// 綁定
+document.addEventListener('DOMContentLoaded', () => {}, {once:true});
+setTimeout(() => {
+  // 對話頁綁定
+  const msgSendBtn = document.getElementById('msg-send-btn');
+  if (msgSendBtn) {
+    msgSendBtn.addEventListener('click', () => {
+      if (isLoading && abortCtrl) { abortCtrl.abort(); }
+      else { sendMsg(); }
+    });
+  }
+  const msgEndBtn = document.getElementById('msg-end-btn');
+  if (msgEndBtn) msgEndBtn.addEventListener('click', endMsgConversation);
+  const msgUi = document.getElementById('msg-user-input');
+  if (msgUi) {
+    msgUi.addEventListener('input', () => {
+      msgUi.style.height = 'auto';
+      msgUi.style.height = Math.min(msgUi.scrollHeight, 120) + 'px';
+    });
+  }
+  const msgAttach = document.getElementById('msg-attach-btn');
+  const msgFileInput = document.getElementById('msg-file-input');
+  if (msgAttach && msgFileInput) {
+    msgAttach.addEventListener('click', () => msgFileInput.click());
+    msgFileInput.addEventListener('change', e => {
+      const files = Array.from(e.target.files); e.target.value = '';
+      if (!files.length) return;
+      Promise.all(files.map(f => {
+        const isPdf = f.type === 'application/pdf', isImg = f.type.startsWith('image/');
+        if (!isPdf && !isImg) return null;
+        const b64promise = isImg ? compressImage(f) : toB64(f);
+        return b64promise.then(b64 => ({type:isPdf?'pdf':'image',mime:isPdf?f.type:'image/jpeg',data:b64.split(',')[1],src:b64,name:f.name}));
+      })).then(results => {
+        results.filter(Boolean).forEach(pf => msgPendingFiles.push(pf));
+        const wrap = document.getElementById('msg-file-preview');
+        wrap.innerHTML = '';
+        if (!msgPendingFiles.length) { wrap.style.display = 'none'; return; }
+        wrap.style.display = 'flex';
+        msgPendingFiles.forEach((pf, idx) => {
+          const item = document.createElement('div'); item.className = 'fp-item';
+          if (pf.type === 'image') { const img = document.createElement('img'); img.src = pf.src; item.appendChild(img); }
+          else { const icon = document.createElement('span'); icon.className = 'fp-icon'; icon.textContent = '📄'; item.appendChild(icon); }
+          const name = document.createElement('span'); name.className = 'fp-name'; name.textContent = pf.name;
+          item.appendChild(name);
+          const rm = document.createElement('button'); rm.className = 'fp-rm'; rm.textContent = '✕';
+          rm.addEventListener('click', () => { msgPendingFiles.splice(idx, 1); msgFileInput.dispatchEvent(new Event('change')); });
+          item.appendChild(rm);
+          wrap.appendChild(item);
+        });
+      });
+    });
+  }
+  // 檢視 modal 關閉
+  const mvClose = document.getElementById('msg-view-close');
+  if (mvClose) mvClose.addEventListener('click', () => document.getElementById('msg-view-modal').classList.remove('open'));
+  const mvModal = document.getElementById('msg-view-modal');
+  if (mvModal) mvModal.addEventListener('click', e => { if (e.target === mvModal) mvModal.classList.remove('open'); });
+}, 100);
+
 function applyDarkMode() {
   document.body.classList.toggle('dark', darkMode);
   const meta = document.getElementById('theme-color-meta');
@@ -1699,6 +2110,7 @@ function fillSettingsPage() {
   document.getElementById('pg-oai-key').value = oaiKey || '';
   document.getElementById('pg-name').value = charName || '';
   document.getElementById('pg-inst').value = instText || '';
+  document.getElementById('pg-inst-msg').value = instTextMsg || '';
   setAv('pg-av-img','pg-av-ph',avatarB64);
   renderDocs('pg-doc-list');
 }
@@ -1744,21 +2156,25 @@ document.getElementById('cal-refresh-btn').addEventListener('click', ()=>{
 });
 
 // 設定頁：儲存
-document.getElementById('pg-save-btn').addEventListener('click', ()=>{
+function doSaveSettings() {
   const ck=document.getElementById('pg-claude-key').value.trim();
   const dk=document.getElementById('pg-ds-key').value.trim();
   const ok=document.getElementById('pg-oai-key').value.trim();
   apiKey = ck; dsKey = dk; oaiKey = ok;
   charName=document.getElementById('pg-name').value.trim()||'角色';
   instText=document.getElementById('pg-inst').value.trim();
+  instTextMsg=document.getElementById('pg-inst-msg').value.trim();
   document.getElementById('hdr-name').textContent=charName;
+  document.getElementById('msg-hdr-name').textContent=charName;
   setAv('hdr-av-img','hdr-av-ph',avatarB64);
+  setAv('msg-hdr-av-img','msg-hdr-av-ph',avatarB64);
   save();
-  const btn = document.getElementById('pg-save-btn');
+  const btn = document.getElementById('pg-save-btn-top');
   const originalText = btn.textContent;
-  btn.textContent = '✓ 已儲存';
+  btn.textContent = '✓';
   setTimeout(()=>btn.textContent=originalText, 1500);
-});
+}
+document.getElementById('pg-save-btn-top').addEventListener('click', doSaveSettings);
 
 // 設定頁：匯出/匯入/清除
 document.getElementById('pg-export-btn').addEventListener('click', exportConv);
@@ -2772,5 +3188,15 @@ function compressImage(file, maxSize=1024, quality=0.82) {
   });
 }
 </script>
+<!-- 對話紀錄檢視 Modal -->
+<div id="msg-view-modal">
+  <div class="msg-view-sheet">
+    <div class="msg-view-hdr">
+      <div style="font-size:14px;font-weight:600" id="msg-view-title">對話紀錄</div>
+      <button style="background:none;border:none;color:var(--text-dim);font-size:20px;cursor:pointer" id="msg-view-close">✕</button>
+    </div>
+    <div class="msg-view-body" id="msg-view-body"></div>
+  </div>
+</div>
 </body>
 </html>
