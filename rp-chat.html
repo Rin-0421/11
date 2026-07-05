@@ -1146,8 +1146,17 @@ async function fetchGcalEvents() {
       return;
     }
     const listData = await listRes.json();
-    const calendars = listData.items || [];
-    console.log('[gcal] found calendars:', calendars.length, calendars.map(c=>c.summary));
+    const rawCalendars = listData.items || [];
+    // 只讀屬於自己的行事曆：owner 權限、或系統內建（生日、假期）
+    const calendars = rawCalendars.filter(cal => {
+      if (cal.accessRole === 'owner') return true; // 自己的行事曆
+      // Google 系統行事曆的 ID 特徵
+      if (cal.id && (cal.id.includes('holiday@group.v.calendar.google.com') ||
+                     cal.id.includes('#contacts@group.v.calendar.google.com') ||
+                     cal.id === 'addressbook#contacts@group.v.calendar.google.com')) return true;
+      return false;
+    });
+    console.log('[gcal] filtered calendars:', calendars.length, calendars.map(c=>c.summary));
 
     // 遍歷每個行事曆抓事件
     let allEvents = [];
@@ -1172,9 +1181,6 @@ async function fetchGcalEvents() {
       return ta.localeCompare(tb);
     });
     console.log('[gcal] total events:', allEvents.length);
-    // Debug 訊息
-    const debugMsg = calendars.map(c=>`${c.summary}: ${allEvents.filter(e=>e._calName===c.summary).length}`).join('\n');
-    alert('抓到的行事曆與事件數：\n' + debugMsg + '\n\n總計：' + allEvents.length + ' 個事件');
     gcalEvents = allEvents;
     gcalSnapshotTime = Date.now();
     save();
