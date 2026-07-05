@@ -470,15 +470,15 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
 .fp-rm { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 14px; flex-shrink: 0; transition: color .15s; }
 .fp-rm:hover { color: var(--danger); }
 .input-row { display: flex; gap: 7px; align-items: flex-end; }
-#user-input {
+#user-input, #msg-user-input {
   flex: 1; background: var(--bg); border: 1px solid var(--border);
   color: var(--text); font-size: 14px; padding: 10px 13px;
   border-radius: 22px; outline: none; resize: none;
   min-height: 42px; max-height: 130px;
   font-family: inherit; line-height: 1.5; transition: border-color .15s;
 }
-#user-input:focus { border-color: var(--accent); }
-#user-input::placeholder { color: var(--text-dim); opacity: .65; }
+#user-input:focus, #msg-user-input:focus { border-color: var(--accent); }
+#user-input::placeholder, #msg-user-input::placeholder { color: var(--text-dim); opacity: .65; }
 .attach-btn { width: 40px; height: 40px; background: var(--surface2); border: 1px solid var(--border); border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 18px; color: var(--text-dim); transition: border-color .15s, color .15s; }
 .attach-btn:hover { border-color: var(--accent); color: var(--accent); }
 .send-btn { width: 40px; height: 40px; background: linear-gradient(135deg, var(--accent-dim), var(--accent)); border: none; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: opacity .15s, transform .1s; }
@@ -611,27 +611,25 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
     <div class="hdr-btns">
       <button class="think-toggle" id="msg-think-toggle" title="延伸思考">💭</button>
       <button class="think-toggle" id="msg-search-toggle" title="網路搜尋">🔍</button>
-      <button class="btn-sm" id="msg-end-btn" style="font-size:12px;padding:5px 8px">結束</button>
+      <select class="hdr-select" id="msg-model-select">
+        <optgroup label="Claude">
+          <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
+          <option value="claude-sonnet-4-6" selected>Sonnet 4.6</option>
+          <option value="claude-opus-4-7">Opus 4.7</option>
+          <option value="claude-opus-4-5">Opus 4.5</option>
+          <option value="claude-opus-4-6">Opus 4.6</option>
+        </optgroup>
+        <optgroup label="DeepSeek">
+          <option value="deepseek-v4-flash">DS V4 Flash</option>
+          <option value="deepseek-v4-pro">DS V4 Pro</option>
+        </optgroup>
+        <optgroup label="OpenAI">
+          <option value="gpt-4o-2024-05-13">GPT-4o 5月版</option>
+          <option value="gpt-4.1">GPT-4.1</option>
+        </optgroup>
+      </select>
+      <button class="think-toggle" id="msg-end-btn" title="結束對話" style="font-size:11px">結束</button>
     </div>
-  </div>
-  <div class="chat-header" style="border-top:none;padding-top:0">
-    <select class="hdr-select" id="msg-model-select" style="flex:1">
-      <optgroup label="Claude">
-        <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
-        <option value="claude-sonnet-4-6" selected>Sonnet 4.6</option>
-        <option value="claude-opus-4-7">Opus 4.7</option>
-        <option value="claude-opus-4-5">Opus 4.5</option>
-        <option value="claude-opus-4-6">Opus 4.6</option>
-      </optgroup>
-      <optgroup label="DeepSeek">
-        <option value="deepseek-v4-flash">DS V4 Flash</option>
-        <option value="deepseek-v4-pro">DS V4 Pro</option>
-      </optgroup>
-      <optgroup label="OpenAI">
-        <option value="gpt-4o-2024-05-13">GPT-4o 5月版</option>
-        <option value="gpt-4.1">GPT-4.1</option>
-      </optgroup>
-    </select>
   </div>
   <div id="messages-msg" style="flex:1;overflow-y:auto;padding:14px 13px;display:flex;flex-direction:column;gap:7px"></div>
   <div class="input-area">
