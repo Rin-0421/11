@@ -692,7 +692,7 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
     </div>
     <div id="fit-content">
       <details class="fit-block">
-        <summary class="fit-summary">❤ 心率</summary>
+        <summary class="fit-summary">❤ 活動量（Heart Points）</summary>
         <div class="fit-body" id="fit-heart-body"></div>
       </details>
       <details class="fit-block">
@@ -1066,9 +1066,8 @@ function switchPage(target) {
   if (target==='home') initHome();
   if (target==='extra') renderFitPage();
   if (target==='calendar') {
+    // 只顯示快照，不自動登入。要更新請按重新整理
     renderGcalPage();
-    if (gcalToken && Date.now() >= gcalTokenExpiry) ensureGcalToken().then(ok => { if (ok) fetchGcalEvents(); });
-    else if (gcalToken) fetchGcalEvents();
   }
 }
 document.querySelectorAll('.nav-btn').forEach(btn => {
@@ -1279,30 +1278,25 @@ async function fetchFitData() {
       }));
     }
 
-    // 心率：按天聚合（平均、min、max）
-    const hrRes = await fetch('https://www.googleapis.com/fitness/v1/users/me/dataset:aggregate', {
+    // Heart Points：按天聚合
+    const hpRes = await fetch('https://www.googleapis.com/fitness/v1/users/me/dataset:aggregate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${gcalToken}` },
       body: JSON.stringify({
-        aggregateBy: [{ dataTypeName: 'com.google.heart_rate.bpm' }],
+        aggregateBy: [{ dataTypeName: 'com.google.heart_minutes' }],
         bucketByTime: { durationMillis: 86400000 },
         startTimeMillis: startMs, endTimeMillis: endMs
       })
     });
-    console.log('[fit] hr status:', hrRes.status);
-    if (!hrRes.ok) { const t = await hrRes.text(); console.error('[fit] hr err:', t); }
-    if (hrRes.ok) {
-      const d = await hrRes.json();
-      console.log('[fit] hr buckets:', d.bucket?.length);
-      fitData.heart = (d.bucket || []).map(b => {
-        const pt = b.dataset[0]?.point?.[0]?.value;
-        return {
-          date: new Date(parseInt(b.startTimeMillis)).toISOString().slice(0, 10),
-          avg: pt?.[0]?.fpVal ? Math.round(pt[0].fpVal) : null,
-          max: pt?.[1]?.fpVal ? Math.round(pt[1].fpVal) : null,
-          min: pt?.[2]?.fpVal ? Math.round(pt[2].fpVal) : null
-        };
-      });
+    console.log('[fit] hp status:', hpRes.status);
+    if (!hpRes.ok) { const t = await hpRes.text(); console.error('[fit] hp err:', t); }
+    if (hpRes.ok) {
+      const d = await hpRes.json();
+      console.log('[fit] hp buckets:', d.bucket?.length);
+      fitData.heart = (d.bucket || []).map(b => ({
+        date: new Date(parseInt(b.startTimeMillis)).toISOString().slice(0, 10),
+        points: Math.round(b.dataset[0]?.point?.reduce((s, p) => s + (p.value[0]?.fpVal || 0), 0) || 0)
+      }));
     }
 
     // 睡眠：session
@@ -1344,15 +1338,14 @@ function renderFitPage() {
   content.style.display = hasData ? 'block' : 'none';
   if (!hasData) return;
 
-  // 心率
+  // Heart Points
   const heartBody = document.getElementById('fit-heart-body');
-  if (!fitData.heart.length || fitData.heart.every(h => !h.avg)) {
-    heartBody.innerHTML = '<div class="fit-empty">沒有心率資料</div>';
+  if (!fitData.heart.length || fitData.heart.every(h => !h.points)) {
+    heartBody.innerHTML = '<div class="fit-empty">沒有活動資料</div>';
   } else {
     heartBody.innerHTML = fitData.heart.slice(-5).reverse().map(h => {
       const label = new Date(h.date).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric', weekday: 'short' });
-      const val = h.avg ? `${h.min || '-'}~${h.max || '-'} / 平均 ${h.avg} bpm` : '無資料';
-      return `<div class="fit-row"><div class="fit-row-date">${label}</div><div class="fit-row-val">${val}</div></div>`;
+      return `<div class="fit-row"><div class="fit-row-date">${label}</div><div class="fit-row-val">${h.points || 0} pts</div></div>`;
     }).join('');
   }
 
@@ -1385,13 +1378,14 @@ function buildFitContext() {
   const today = new Date().toISOString().slice(0, 10);
   const todaySteps = fitData.steps.find(s => s.date === today);
   const todayHeart = fitData.heart.find(h => h.date === today);
-  const lastSleep = fitData.sleep.slice(-1)[0];
+  // 睡眠只找今天結束的那筆（也就是昨晚睡今天早上醒）
+  const todaySleep = fitData.sleep.find(s => s.date === today);
   const parts = [];
   if (todaySteps) parts.push(`- 今日步數：${todaySteps.value.toLocaleString()}`);
-  if (todayHeart && todayHeart.avg) parts.push(`- 今日心率：${todayHeart.min || '-'}~${todayHeart.max || '-'} bpm，平均 ${todayHeart.avg}`);
-  if (lastSleep) {
-    const h = Math.floor(lastSleep.durationMin / 60), m = lastSleep.durationMin % 60;
-    parts.push(`- 昨晚睡眠：${lastSleep.startTime} → ${lastSleep.endTime}（${h}h${m}m）`);
+  if (todayHeart && todayHeart.points) parts.push(`- 今日活動量：${todayHeart.points} Heart Points（Google Fit 心率提升活動積分，每分鐘中強度活動 1 分）`);
+  if (todaySleep) {
+    const h = Math.floor(todaySleep.durationMin / 60), m = todaySleep.durationMin % 60;
+    parts.push(`- 昨晚睡眠：${todaySleep.startTime} → ${todaySleep.endTime}（${h}h${m}m）`);
   }
   if (!parts.length) return '';
   return `[今日健康]\n${parts.join('\n')}\n[結束]`;
