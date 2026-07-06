@@ -196,7 +196,7 @@ body.notif-view .chat-header .hdr-select { display: none; }
 .msg-archive-del:hover { color: var(--danger); }
 .msg-empty-hint { text-align: center; color: var(--text-dim); padding: 20px; font-size: 12px; }
 
-/* 對話紀錄檢視 Modal */
+/* 聊天紀錄檢視 Modal */
 #msg-view-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.85); z-index: 200; align-items: center; justify-content: center; padding: 20px; }
 #msg-view-modal.open { display: flex; }
 .msg-view-sheet { background: var(--bg); border: 1px solid var(--border); border-radius: 14px; max-width: 500px; width: 100%; max-height: 80vh; display: flex; flex-direction: column; overflow: hidden; }
@@ -722,17 +722,17 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
       <textarea class="ftextarea" id="pg-inst" style="min-height:96px" placeholder="給 AI 的行為規則（RP 對戲模式）…"></textarea>
     </div>
     <div class="card" style="max-width:none">
-      <div class="card-title">對話指令</div>
-      <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px">用於「對話」的訊息模式</div>
+      <div class="card-title">聊天指令</div>
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px">用於「聊天」的訊息模式</div>
       <textarea class="ftextarea" id="pg-inst-msg" style="min-height:96px" placeholder="給 AI 的行為規則（訊息模式）…"></textarea>
     </div>
     <div class="card" style="max-width:none">
       <div class="card-title">主動訊息</div>
       <div style="font-size:11px;color:var(--text-dim);margin-bottom:10px;line-height:1.5">
-        09:00~21:00 之間，距離上次互動超過 3 小時時，角色會主動傳訊息。主頁和對話頁共用每日上限，一天最多 3 次。上次未回覆時暫停，直到你回覆才重新計時。
+        09:00~21:00 之間，距離上次互動超過 3 小時時，角色會主動傳訊息。主頁和聊天頁共用每日上限，一天最多 3 次。上次未回覆時暫停，直到你回覆才重新計時。
       </div>
       <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:6px 0;border-bottom:1px solid var(--border);margin-bottom:8px">
-        <span style="font-size:13px;font-weight:600">📩 對話頁（訊息模式）</span>
+        <span style="font-size:13px;font-weight:600">📩 聊天頁（訊息模式）</span>
         <input type="checkbox" id="pg-proactive-msg" style="width:44px;height:24px;cursor:pointer">
       </label>
       <div style="font-size:11px;color:var(--text-dim);margin-bottom:8px">主頁對話：</div>
@@ -774,7 +774,7 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
 <div id="page-extra" class="page" data-page="extra">
   <div class="page-hdr">其他</div>
   <div class="page-body">
-    <div class="section-title">對話紀錄</div>
+    <div class="section-title">聊天紀錄</div>
     <div id="msg-archives-list"></div>
     <div class="section-title" style="margin-top:20px">健康</div>
     <div id="fit-not-connected" style="display:none;color:var(--text-dim);text-align:center;padding:20px;font-size:13px">
@@ -805,7 +805,7 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
   </button>
   <button class="nav-btn" data-target="messages">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-    <span class="nav-label">對話</span>
+    <span class="nav-label">聊天</span>
   </button>
   <button class="nav-btn" data-target="settings">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -2367,8 +2367,8 @@ async function sendMsg() {
 }
 
 function endMsgConversation() {
-  if (!msgHistory.length) { alert('目前沒有對話可以結束'); return; }
-  if (!confirm('結束對話並封存？結束後這段對話會移到「其他」的對話紀錄，模型將不再看見。')) return;
+  if (!msgHistory.length) { alert('目前沒有聊天可以結束'); return; }
+  if (!confirm('結束聊天並封存？結束後這段聊天會移到「其他」的聊天紀錄，模型將不再看見。')) return;
   msgArchives.push({
     id: Date.now() + '_' + Math.random().toString(36).slice(2, 8),
     startTime: msgHistory[0]?._time || nowTW(),
@@ -2406,7 +2406,7 @@ function renderMsgArchives() {
     });
     item.querySelector('.msg-archive-del').addEventListener('click', (e) => {
       e.stopPropagation();
-      if (confirm('刪除這段對話紀錄？此動作無法復原。')) {
+      if (confirm('刪除這段聊天紀錄？此動作無法復原。')) {
         msgArchives = msgArchives.filter(x => x.id !== a.id);
         save(); renderMsgArchives();
       }
@@ -2418,7 +2418,7 @@ function renderMsgArchives() {
 function openMsgArchiveView(archive) {
   const modal = document.getElementById('msg-view-modal');
   const body = document.getElementById('msg-view-body');
-  document.getElementById('msg-view-title').textContent = `${archive.startTime} 的對話`;
+  document.getElementById('msg-view-title').textContent = `${archive.startTime} 的聊天`;
   body.innerHTML = '';
   archive.history.forEach(m => {
     const row = document.createElement('div');
@@ -2481,24 +2481,29 @@ setTimeout(() => {
         return b64promise.then(b64 => ({type:isPdf?'pdf':'image',mime:isPdf?f.type:'image/jpeg',data:b64.split(',')[1],src:b64,name:f.name}));
       })).then(results => {
         results.filter(Boolean).forEach(pf => msgPendingFiles.push(pf));
-        const wrap = document.getElementById('msg-file-preview');
-        wrap.innerHTML = '';
-        if (!msgPendingFiles.length) { wrap.style.display = 'none'; return; }
-        wrap.style.display = 'flex';
-        msgPendingFiles.forEach((pf, idx) => {
-          const item = document.createElement('div'); item.className = 'fp-item';
-          if (pf.type === 'image') { const img = document.createElement('img'); img.src = pf.src; item.appendChild(img); }
-          else { const icon = document.createElement('span'); icon.className = 'fp-icon'; icon.textContent = '📄'; item.appendChild(icon); }
-          const name = document.createElement('span'); name.className = 'fp-name'; name.textContent = pf.name;
-          item.appendChild(name);
-          const rm = document.createElement('button'); rm.className = 'fp-rm'; rm.textContent = '✕';
-          rm.addEventListener('click', () => { msgPendingFiles.splice(idx, 1); msgFileInput.dispatchEvent(new Event('change')); });
-          item.appendChild(rm);
-          wrap.appendChild(item);
-        });
+        renderMsgFilePreview();
       });
     });
   }
+  // 讓 renderMsgFilePreview 可以被外部調用
+  window.renderMsgFilePreview = function() {
+    const wrap = document.getElementById('msg-file-preview');
+    if (!wrap) return;
+    wrap.innerHTML = '';
+    if (!msgPendingFiles.length) { wrap.style.display = 'none'; return; }
+    wrap.style.display = 'flex';
+    msgPendingFiles.forEach((pf, idx) => {
+      const item = document.createElement('div'); item.className = 'fp-item';
+      if (pf.type === 'image') { const img = document.createElement('img'); img.src = pf.src; item.appendChild(img); }
+      else { const icon = document.createElement('span'); icon.className = 'fp-icon'; icon.textContent = '📄'; item.appendChild(icon); }
+      const name = document.createElement('span'); name.className = 'fp-name'; name.textContent = pf.name;
+      item.appendChild(name);
+      const rm = document.createElement('button'); rm.className = 'fp-rm'; rm.textContent = '✕';
+      rm.addEventListener('click', () => { msgPendingFiles.splice(idx, 1); renderMsgFilePreview(); });
+      item.appendChild(rm);
+      wrap.appendChild(item);
+    });
+  };
   // 對話頁模型/思考/搜尋 綁定
   const msgModelSel = document.getElementById('msg-model-select');
   const msgThinkBtn = document.getElementById('msg-think-toggle');
@@ -3659,7 +3664,7 @@ function compressImage(file, maxSize=1024, quality=0.82) {
   });
 }
 </script>
-<!-- 對話紀錄檢視 Modal -->
+<!-- 聊天紀錄檢視 Modal -->
 <div id="msg-view-modal">
   <div class="msg-view-sheet">
     <div class="msg-view-hdr">
