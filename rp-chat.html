@@ -2042,6 +2042,9 @@ async function regenerateAssistantMsg() {
   document.getElementById('msg-stop-icon').style.display = '';
 
   try {
+    // 直接從 select 讀取當前值（防止 msgModel 未同步）
+    const sel = document.getElementById('msg-model-select');
+    if (sel) msgModel = sel.value;
     const model = msgModel;
     const sysParts = [];
     if (docs.length) { sysParts.push('[知識文件]'); docs.forEach(d => sysParts.push(`## ${d.name}\n${d.content}`)); }
@@ -2217,7 +2220,10 @@ async function sendMsg() {
   save(); renderMsgPage();
 
   try {
-    const model = document.getElementById('chat-model').value;
+    // 讀取聊天頁自己的模型（不是主頁的）
+    const sel = document.getElementById('msg-model-select');
+    if (sel) msgModel = sel.value;
+    const model = msgModel;
     // 用訊息模式的 system prompt
     const sysParts = [];
     if (docs.length) { sysParts.push('[知識文件]'); docs.forEach(d=>sysParts.push(`## ${d.name}\n${d.content}`)); }
