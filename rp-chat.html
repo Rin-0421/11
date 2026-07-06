@@ -410,6 +410,10 @@ details[open] .fit-summary::before { transform: rotate(90deg); }
   padding-left: 0;
   text-align: right;
 }
+/* 對話模式：連續氣泡（--- 拆出來的）間距縮小，中段氣泡改全圓角，只有最後一顆保留尖尾巴 */
+.msg-row.msg-mode .bubble + .bubble { margin-top: 3px; }
+.msg-row.msg-mode.assistant .bubble:has(+ .bubble) { border-bottom-left-radius: 18px; }
+.msg-row.msg-mode.user .bubble:has(+ .bubble) { border-bottom-right-radius: 18px; }
 .msg-row.user .bubble { background: var(--user-bubble); border-bottom-right-radius: 4px; }
 .bubble.typing { color: var(--text-dim); font-style: italic; }
 .bt { display: block; }
@@ -1957,21 +1961,19 @@ function renderMsgPage() {
       nm.textContent = charName || '角色';
       col.appendChild(nm);
     }
-    const bbl = document.createElement('div');
-    bbl.className = 'bubble';
-    // 處理圖片附件
+    // 圖片附件（預先建好，只掛到第一顆氣泡）
+    let imgGrid = null;
     if (Array.isArray(m.content)) {
       const imgs = m.content.filter(b => b.type === 'image');
       if (imgs.length) {
-        const grid = document.createElement('div');
-        grid.className = 'msg-img-grid';
+        imgGrid = document.createElement('div');
+        imgGrid.className = 'msg-img-grid';
         imgs.forEach(img => {
           const el2 = document.createElement('img');
           el2.src = `data:${img.source.media_type};base64,${img.source.data}`;
           el2.className = 'msg-img';
-          grid.appendChild(el2);
+          imgGrid.appendChild(el2);
         });
-        bbl.appendChild(grid);
       }
     }
     // 思考區塊還原（放在氣泡之前）
@@ -1983,19 +1985,30 @@ function renderMsgPage() {
       th.innerHTML = '<summary class="thinking-summary">思考過程</summary><div class="thinking-content">' + esc2(thinkText) + '</div>';
       col.appendChild(th);
     }
-    const sp = document.createElement('span');
-    sp.className = 'bt';
     const text = typeof m.content === 'string' ? m.content
       : (m.content.find(b => b.type === 'text')?.text || '');
-    renderBt(sp, text);
-    bbl.appendChild(sp);
-    if (m._time) {
-      const t = document.createElement('span');
-      t.className = 'msg-time';
-      t.textContent = m._time;
-      bbl.appendChild(t);
-    }
-    col.appendChild(bbl);
+    // 按獨立行的 --- 拆成多顆氣泡（LINE 風連續訊息）；未拆到就當一顆
+    const rawParts = text.split(/\n\s*---+\s*\n/g).map(s => s.trim()).filter(s => s.length > 0);
+    const segs = rawParts.length > 1 ? rawParts : [text];
+    let bbl = null; // 最後一顆氣泡，供下方 actions 綁定用
+    segs.forEach((segText, segIdx) => {
+      const b = document.createElement('div');
+      b.className = 'bubble';
+      if (segIdx === 0 && imgGrid) b.appendChild(imgGrid);
+      const sp = document.createElement('span');
+      sp.className = 'bt';
+      renderBt(sp, segText);
+      b.appendChild(sp);
+      // 時間戳只掛在最後一顆（同組連續訊息共用時間）
+      if (segIdx === segs.length - 1 && m._time) {
+        const t = document.createElement('span');
+        t.className = 'msg-time';
+        t.textContent = m._time;
+        b.appendChild(t);
+      }
+      col.appendChild(b);
+      bbl = b;
+    });
 
     // Action buttons
     const actions = document.createElement('div');
@@ -2009,8 +2022,11 @@ function renderMsgPage() {
       editBtn.className = 'action-btn'; editBtn.textContent = '✏ 編輯';
       editBtn.addEventListener('click', e => { e.stopPropagation(); editMsgMessage(i); });
       actions.appendChild(editBtn);
-      bbl.style.cursor = 'pointer';
-      bbl.addEventListener('click', e => { e.stopPropagation(); actions.classList.toggle('show'); });
+      // 訊息可能拆成多顆氣泡，每顆都要能點擊展開 actions
+      col.querySelectorAll('.bubble').forEach(b => {
+        b.style.cursor = 'pointer';
+        b.addEventListener('click', e => { e.stopPropagation(); actions.classList.toggle('show'); });
+      });
     } else {
       const copyBtn = document.createElement('button');
       copyBtn.className = 'action-btn'; copyBtn.textContent = '複製';
