@@ -551,11 +551,6 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
     <div class="conv-list" id="conv-list"></div>
     <div class="sidebar-footer">
       <button class="sidebar-footer-btn" id="sb-settings-btn">⚙ 角色與設定</button>
-      <button class="sidebar-footer-btn" id="sb-export-btn">📤 匯出目前對話</button>
-      <button class="sidebar-footer-btn" id="sb-import-btn">📥 匯入網頁對話</button>
-      <button class="sidebar-footer-btn" id="sb-import-claude-btn">📥 匯入官端對話</button>
-      <input type="file" id="import-file" accept=".json" style="display:none">
-      <input type="file" id="import-claude-file-sb" accept=".json" style="display:none">
     </div>
   </div>
 
@@ -904,6 +899,43 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
       <button class="modal-cancel" id="modal-cancel">取消</button>
       <button class="modal-confirm" id="modal-confirm">匯入</button>
     </div>
+  </div>
+</div>
+
+<!-- 匯出選擇 Modal -->
+<div id="export-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:200;align-items:center;justify-content:center;padding:20px">
+  <div class="modal-sheet" style="max-height:80vh;display:flex;flex-direction:column">
+    <div class="modal-title">✦ 匯出</div>
+    <div class="modal-sub">選擇要匯出的項目</div>
+    <div id="export-list" style="flex:1;overflow-y:auto;margin-bottom:12px"></div>
+    <div class="modal-btns">
+      <button class="modal-cancel" id="export-cancel">取消</button>
+      <button class="modal-confirm" id="export-confirm">匯出</button>
+    </div>
+  </div>
+</div>
+
+<!-- 匯入選擇 Modal -->
+<div id="import-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:200;align-items:center;justify-content:center;padding:20px">
+  <div class="modal-sheet" style="max-height:80vh;display:flex;flex-direction:column">
+    <div class="modal-title">✦ 匯入</div>
+    <div class="modal-sub">選擇要匯入的項目（全部會匯入到主頁）</div>
+    <div id="import-list" style="flex:1;overflow-y:auto;margin-bottom:12px"></div>
+    <div class="modal-btns">
+      <button class="modal-cancel" id="import-cancel">取消</button>
+      <button class="modal-confirm" id="import-confirm">匯入</button>
+    </div>
+  </div>
+</div>
+
+<!-- 聊天紀錄檢視 Modal -->
+<div id="msg-view-modal">
+  <div class="msg-view-sheet">
+    <div class="msg-view-hdr">
+      <div style="font-size:14px;font-weight:600" id="msg-view-title">對話紀錄</div>
+      <button style="background:none;border:none;color:var(--text-dim);font-size:20px;cursor:pointer" id="msg-view-close">✕</button>
+    </div>
+    <div class="msg-view-body" id="msg-view-body"></div>
   </div>
 </div>
 
@@ -2787,18 +2819,6 @@ document.getElementById('sb-settings-btn').addEventListener('click', () => {
   closeSidebar(); openSettings();
 });
 
-document.getElementById('sb-export-btn').addEventListener('click', () => {
-  closeSidebar(); exportConv();
-});
-
-document.getElementById('sb-import-btn').addEventListener('click', () => {
-  document.getElementById('import-file').click();
-});
-document.getElementById('import-file').addEventListener('change', e => {
-  const f=e.target.files[0]; if(!f) return; e.target.value='';
-  doImport(f);
-});
-
 // ── Render messages ──
 function renderMessages() {
   const el = document.getElementById('messages');
@@ -3482,12 +3502,75 @@ document.getElementById('set-save-btn').addEventListener('click', ()=>{
 
 // ── Export ──
 function exportConv() {
-  const conv=currentConv(); if(!conv) return;
-  const data=JSON.stringify({convName:conv.name,charName,docs,instText,history:conv.history},null,2);
-  const a=document.createElement('a');
-  a.href=URL.createObjectURL(new Blob([data],{type:'application/json'}));
-  a.download=`rp-${conv.name}-${Date.now()}.json`; a.click();
+  // 開啟選擇 modal
+  const modal = document.getElementById('export-modal');
+  const list = document.getElementById('export-list');
+  list.innerHTML = '';
+
+  // 建立清單：所有主頁對話 + 目前聊天 + 已封存聊天
+  const items = [];
+  // 主頁對話
+  conversations.filter(cv => cv.id !== NOTIF_VIEW_ID).forEach(cv => {
+    items.push({ type: 'conv', id: cv.id, name: `📁 ${cv.name}`, meta: `${cv.history?.length || 0} 則` });
+  });
+  // 目前聊天
+  if (msgHistory.length) {
+    items.push({ type: 'msg-current', name: '💬 目前的聊天', meta: `${msgHistory.length} 則` });
+  }
+  // 已封存聊天
+  msgArchives.forEach(a => {
+    items.push({ type: 'msg-archive', id: a.id, name: `📩 ${a.startTime}`, meta: `${a.count} 則` });
+  });
+
+  if (!items.length) {
+    list.innerHTML = '<div style="text-align:center;color:var(--text-dim);padding:20px;font-size:13px">沒有可匯出的項目</div>';
+  } else {
+    items.forEach((it, i) => {
+      const row = document.createElement('label');
+      row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:10px 4px;cursor:pointer;border-bottom:1px solid var(--border)';
+      row.innerHTML = `<input type="checkbox" class="export-cb" data-idx="${i}" style="width:18px;height:18px;cursor:pointer">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;color:var(--text)">${escHtml(it.name)}</div>
+          <div style="font-size:11px;color:var(--text-dim);margin-top:2px">${it.meta}</div>
+        </div>`;
+      list.appendChild(row);
+    });
+  }
+  window._exportItems = items;
+  modal.style.display = 'flex';
 }
+
+document.getElementById('export-cancel').addEventListener('click', () => {
+  document.getElementById('export-modal').style.display = 'none';
+});
+
+document.getElementById('export-confirm').addEventListener('click', () => {
+  const checked = Array.from(document.querySelectorAll('.export-cb:checked'));
+  if (!checked.length) { alert('請至少選擇一項'); return; }
+  const items = window._exportItems || [];
+  const payload = {
+    charName, docs, instText, instTextMsg,
+    conversations: [], msgHistory: null, msgArchives: []
+  };
+  checked.forEach(cb => {
+    const it = items[+cb.dataset.idx];
+    if (it.type === 'conv') {
+      const cv = conversations.find(c => c.id === it.id);
+      if (cv) payload.conversations.push({ id: cv.id, name: cv.name, history: cv.history, archive: cv.archive, model: cv.model });
+    } else if (it.type === 'msg-current') {
+      payload.msgHistory = msgHistory.slice();
+    } else if (it.type === 'msg-archive') {
+      const a = msgArchives.find(x => x.id === it.id);
+      if (a) payload.msgArchives.push(a);
+    }
+  });
+  const data = JSON.stringify(payload, null, 2);
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([data], { type: 'application/json' }));
+  a.download = `rp-export-${Date.now()}.json`;
+  a.click();
+  document.getElementById('export-modal').style.display = 'none';
+});
 document.getElementById('export-btn').addEventListener('click', exportConv);
 
 // ── 官端格式匯入 ──
@@ -3600,35 +3683,108 @@ document.getElementById('import-claude-file').addEventListener('change', e => {
   handleClaudeImportFile(f);
 });
 
-// 側邊欄的官端匯入按鈕
-document.getElementById('sb-import-claude-btn').addEventListener('click', () => {
-  document.getElementById('import-claude-file-sb').click();
-});
-document.getElementById('import-claude-file-sb').addEventListener('change', e => {
-  const f = e.target.files[0]; if (!f) return; e.target.value='';
-  handleClaudeImportFile(f);
-});
 // ── 網頁格式匯入 ──
 function doImport(f) {
   const r=new FileReader();
   r.onload=()=>{
     try {
       const s=JSON.parse(r.result);
-      if (!Array.isArray(s.history)) throw new Error('格式錯誤');
-      if (!confirm(`匯入「${s.convName||'對話'}」為新的對話窗口？`)) return;
-      const conv={id:uid(),name:s.convName||'匯入的對話',history:s.history};
-      conversations.push(conv);
-      currentConvId=conv.id;
-      if (s.charName) charName=s.charName;
-      if (s.docs) docs=s.docs;
-      if (s.instText) instText=s.instText;
-      document.getElementById('hdr-name').textContent=charName;
-      renderAllDocs(); save(); renderConvList(); renderMessages();
-      document.getElementById('settings-panel').classList.remove('open');
+      // 相容舊格式（單一 history）
+      if (Array.isArray(s.history)) {
+        // 舊格式：直接單筆匯入為新對話
+        if (!confirm(`匯入「${s.convName||'對話'}」為新的對話窗口？`)) return;
+        const conv={id:uid(),name:s.convName||'匯入的對話',history:s.history};
+        conversations.push(conv);
+        currentConvId=conv.id;
+        if (s.charName && !charName) charName=s.charName;
+        document.getElementById('hdr-name').textContent=charName;
+        save(); renderConvList(); renderMessages();
+        return;
+      }
+      // 新格式：多項目選擇匯入
+      if (!s.conversations && !s.msgHistory && !s.msgArchives) {
+        throw new Error('格式錯誤，找不到對話資料');
+      }
+      // 開啟選擇 modal
+      const modal = document.getElementById('import-modal');
+      const list = document.getElementById('import-list');
+      list.innerHTML = '';
+      const items = [];
+      (s.conversations || []).forEach(cv => {
+        items.push({ type: 'conv', data: cv, name: `📁 ${cv.name}`, meta: `${cv.history?.length || 0} 則` });
+      });
+      if (Array.isArray(s.msgHistory) && s.msgHistory.length) {
+        items.push({ type: 'msg-current', data: s.msgHistory, name: '💬 目前的聊天', meta: `${s.msgHistory.length} 則` });
+      }
+      (s.msgArchives || []).forEach(a => {
+        items.push({ type: 'msg-archive', data: a, name: `📩 ${a.startTime}`, meta: `${a.count} 則` });
+      });
+      if (!items.length) { alert('檔案中沒有可匯入的項目'); return; }
+      items.forEach((it, i) => {
+        const row = document.createElement('label');
+        row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:10px 4px;cursor:pointer;border-bottom:1px solid var(--border)';
+        row.innerHTML = `<input type="checkbox" class="import-cb" data-idx="${i}" checked style="width:18px;height:18px;cursor:pointer">
+          <div style="flex:1;min-width:0">
+            <div style="font-size:13px;color:var(--text)">${escHtml(it.name)}</div>
+            <div style="font-size:11px;color:var(--text-dim);margin-top:2px">${it.meta}</div>
+          </div>`;
+        list.appendChild(row);
+      });
+      window._importItems = items;
+      window._importSource = s;
+      modal.style.display = 'flex';
     } catch(err) { alert('匯入失敗：'+err.message); }
   };
   r.readAsText(f);
 }
+
+document.getElementById('import-cancel').addEventListener('click', () => {
+  document.getElementById('import-modal').style.display = 'none';
+});
+
+document.getElementById('import-confirm').addEventListener('click', () => {
+  const checked = Array.from(document.querySelectorAll('.import-cb:checked'));
+  if (!checked.length) { alert('請至少選擇一項'); document.getElementById('import-modal').style.display = 'none'; return; }
+  const items = window._importItems || [];
+  const s = window._importSource || {};
+  let importedCount = 0;
+  checked.forEach(cb => {
+    const it = items[+cb.dataset.idx];
+    if (it.type === 'conv') {
+      const cv = it.data;
+      conversations.push({
+        id: uid(), // 新 id 避免衝突
+        name: cv.name || '匯入的對話',
+        history: cv.history || [],
+        archive: cv.archive || [],
+        model: cv.model
+      });
+      importedCount++;
+    } else if (it.type === 'msg-current') {
+      // 匯入到主頁：建一個新對話
+      conversations.push({
+        id: uid(),
+        name: '匯入的聊天',
+        history: it.data,
+        archive: []
+      });
+      importedCount++;
+    } else if (it.type === 'msg-archive') {
+      // 匯入到主頁：建一個新對話
+      const a = it.data;
+      conversations.push({
+        id: uid(),
+        name: `匯入的聊天（${a.startTime}）`,
+        history: a.history || [],
+        archive: []
+      });
+      importedCount++;
+    }
+  });
+  save(); renderConvList();
+  document.getElementById('import-modal').style.display = 'none';
+  alert(`已匯入 ${importedCount} 個對話到主頁`);
+});
 document.getElementById('import-trigger-btn').addEventListener('click', ()=>document.getElementById('import-file2').click());
 document.getElementById('import-file2').addEventListener('change', e=>{ const f=e.target.files[0]; if(!f) return; e.target.value=''; doImport(f); });
 
@@ -3670,15 +3826,5 @@ function compressImage(file, maxSize=1024, quality=0.82) {
   });
 }
 </script>
-<!-- 聊天紀錄檢視 Modal -->
-<div id="msg-view-modal">
-  <div class="msg-view-sheet">
-    <div class="msg-view-hdr">
-      <div style="font-size:14px;font-weight:600" id="msg-view-title">對話紀錄</div>
-      <button style="background:none;border:none;color:var(--text-dim);font-size:20px;cursor:pointer" id="msg-view-close">✕</button>
-    </div>
-    <div class="msg-view-body" id="msg-view-body"></div>
-  </div>
-</div>
 </body>
 </html>
