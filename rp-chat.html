@@ -9,16 +9,8 @@
 <meta name="apple-mobile-web-app-title" content="Chat">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#f4ead6" id="theme-color-meta">
-<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='50' fill='white'/%3E%3C/svg%3E">
-<script>
-(function(){
-  const icon="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='50' fill='white'/%3E%3C/svg%3E";
-  const m={name:"Chat",short_name:"Chat",display:"standalone",start_url:location.href,background_color:"#f4ead6",theme_color:"#f4ead6",icons:[{src:icon,sizes:"any",type:"image/svg+xml",purpose:"any maskable"}]};
-  const b=new Blob([JSON.stringify(m)],{type:"application/json"});
-  const l=document.createElement("link");l.rel="manifest";l.href=URL.createObjectURL(b);
-  document.currentScript.after(l);
-})();
-</script>
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="manifest" href="manifest.webmanifest">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="https://apis.google.com/js/api.js" async defer></script>
 <style>
@@ -729,6 +721,10 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
       <div class="card-title">主動訊息</div>
       <div style="font-size:11px;color:var(--text-dim);margin-bottom:10px;line-height:1.5">
         09:00~21:00 之間，距離上次互動超過 3 小時時，角色會主動傳訊息。主頁和聊天頁共用每日上限，一天最多 3 次。上次未回覆時暫停，直到你回覆才重新計時。
+      </div>
+      <div style="font-size:11px;margin-bottom:8px;padding:8px;border-radius:8px;background:var(--surface2)">
+        通知權限狀態：<span id="notif-perm-status" style="font-weight:600">檢查中…</span>
+        <button class="btn-sm" id="notif-test-btn" style="margin-left:6px;padding:2px 8px;font-size:11px">測試通知</button>
       </div>
       <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:6px 0;border-bottom:1px solid var(--border);margin-bottom:8px">
         <span style="font-size:13px;font-weight:600">📩 聊天頁（訊息模式）</span>
@@ -1931,8 +1927,18 @@ function stopNotifTimer() {
 
 function requestNotifPermission() {
   if ('Notification' in window && Notification.permission === 'default') {
-    Notification.requestPermission();
+    Notification.requestPermission().then(updateNotifPermStatus);
   }
+}
+
+function updateNotifPermStatus() {
+  const el = document.getElementById('notif-perm-status');
+  if (!el) return;
+  if (!('Notification' in window)) { el.textContent = '此瀏覽器不支援'; el.style.color = '#c0392b'; return; }
+  const p = Notification.permission;
+  if (p === 'granted') { el.textContent = '已允許 ✓'; el.style.color = '#2e7d32'; }
+  else if (p === 'denied') { el.textContent = '已封鎖（需到系統設定手動開啟）'; el.style.color = '#c0392b'; }
+  else { el.textContent = '尚未詢問（開啟上方任一開關會跳出請求）'; el.style.color = 'var(--text-dim)'; }
 }
 
 
@@ -2667,6 +2673,26 @@ document.getElementById('pg-notif-toggle').addEventListener('change', e=>{
   save();
   if (notifEnabled) { requestNotifPermission(); startNotifTimer(); }
   else stopNotifTimer();
+});
+document.getElementById('pg-proactive-msg').addEventListener('change', e=>{
+  proactiveMsgEnabled = e.target.checked;
+  save();
+  if (proactiveMsgEnabled) requestNotifPermission();
+});
+updateNotifPermStatus();
+document.getElementById('notif-test-btn').addEventListener('click', ()=>{
+  if (!('Notification' in window)) { alert('此瀏覽器不支援通知'); return; }
+  if (Notification.permission === 'granted') {
+    new Notification(charName || '測試', { body: '如果你看到這則通知，代表通知功能正常運作 ✓', icon: avatarB64 || undefined });
+  } else if (Notification.permission === 'denied') {
+    alert('通知已被封鎖。請到 Android 設定 → 應用程式 → 找到這個 app → 通知，手動開啟。');
+  } else {
+    Notification.requestPermission().then(p => {
+      updateNotifPermStatus();
+      if (p === 'granted') new Notification(charName || '測試', { body: '通知功能正常運作 ✓', icon: avatarB64 || undefined });
+      else alert('你剛剛拒絕了通知權限，主動訊息將無法跳通知。');
+    });
+  }
 });
 
 document.getElementById('cal-refresh-btn').addEventListener('click', ()=>{
