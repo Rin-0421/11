@@ -969,7 +969,7 @@ let conversations = []; // [{ id, name, history }]
 let currentConvId = null;
 let pendingFiles = [], isLoading = false, abortCtrl = null, darkMode = false;
 let gcalClientId = '', gcalToken = null, gcalTokenExpiry = 0, gcalInject = false, gcalEvents = [], gcalTokenClient = null, gcalSnapshotTime = 0;
-let fitInject = false, fitData = { heart: [], steps: [], sleep: [] }, fitSnapshotTime = 0;
+let fitInject = false, fitData = { heart: [], steps: [], sleep: [] }, fitSnapshotTime = 0, fitTrendLastSentDate = '';
 let proactiveConvIds = [], proactiveState = { lastCheckDate: '', dailyCounts: {} }, proactiveTimer = null;
 let notifications = [], notifEnabled = false, notifLeadMin = 10, notifCheckTimer = null, notifiedIds = new Set();
 let instTextMsg = '', msgHistory = [], msgArchives = [], msgPendingFiles = [], proactiveMsgEnabled = false, msgModel = 'claude-sonnet-4-6';
@@ -1054,6 +1054,7 @@ async function loadState() {
       fitInject = !!s.fitInject;
       fitData = s.fitData || { heart: [], steps: [], sleep: [] };
       fitSnapshotTime = s.fitSnapshotTime || 0;
+      fitTrendLastSentDate = s.fitTrendLastSentDate || '';
       proactiveConvIds = Array.isArray(s.proactiveConvIds) ? s.proactiveConvIds : [];
       proactiveState = s.proactiveState || { lastCheckDate: '', dailyCount: 0, messagesEndTime: 0 };
       if (typeof proactiveState.dailyCount === 'undefined') proactiveState.dailyCount = 0;
@@ -1091,7 +1092,7 @@ async function save() {
     await idbSet(SK, {
       apiKey, dsKey, oaiKey, charName, avatarB64, docs, instText, thinkingEnabled, searchEnabled,
       darkMode, gcalClientId, gcalInject, gcalEvents, gcalSnapshotTime,
-      fitInject, fitData, fitSnapshotTime, proactiveConvIds, proactiveState,
+      fitInject, fitData, fitSnapshotTime, fitTrendLastSentDate, proactiveConvIds, proactiveState,
       notifications, notifEnabled, notifLeadMin, notifiedIds: Array.from(notifiedIds),
       instTextMsg, msgHistory, msgArchives, proactiveMsgEnabled, msgModel,
       conversations, currentConvId,
@@ -1542,20 +1543,46 @@ function renderFitPage() {
 
 function buildFitContext() {
   if (!fitInject) return '';
-  const today = new Date().toISOString().slice(0, 10);
-  const todaySteps = fitData.steps.find(s => s.date === today);
-  const todayHeart = fitData.heart.find(h => h.date === today);
-  // 睡眠只找今天結束的那筆（也就是昨晚睡今天早上醒）
-  const todaySleep = fitData.sleep.find(s => s.date === today);
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const dayLabels = ['今天','昨天','前天','大前天'];
+  const dayLabel = (dateStr) => {
+    const idx = Math.round((new Date(todayStr) - new Date(dateStr)) / 86400000);
+    return dayLabels[idx] || `${idx}天前`;
+  };
+
   const parts = [];
+
+  // 今日資料每次都帶（唯一會隨時間即時變動的部分）
+  const todaySteps = fitData.steps.find(s => s.date === todayStr);
+  const todayHeart = fitData.heart.find(h => h.date === todayStr);
+  const todaySleep = fitData.sleep.find(s => s.date === todayStr);
   if (todaySteps) parts.push(`- 今日步數：${todaySteps.value.toLocaleString()}`);
-  if (todayHeart && todayHeart.points) parts.push(`- 今日活動量：${todayHeart.points} Heart Points（Google Fit 心率提升活動積分，每分鐘中強度活動 1 分）`);
+  if (todayHeart && todayHeart.points) parts.push(`- 今日活動量：${todayHeart.points} Heart Points`);
   if (todaySleep) {
     const h = Math.floor(todaySleep.durationMin / 60), m = todaySleep.durationMin % 60;
     parts.push(`- 昨晚睡眠：${todaySleep.startTime} → ${todaySleep.endTime}（${h}h${m}m）`);
   }
+
+  // 過去幾天的趨勢是定值，一天只附一次，避免每則訊息都重複灌一樣的舊資料
+  if (fitTrendLastSentDate !== todayStr) {
+    const pastSteps = fitData.steps.filter(s => s.date !== todayStr).sort((a,b) => b.date.localeCompare(a.date)).slice(0, 4);
+    const pastSleep = fitData.sleep.filter(s => s.date !== todayStr).sort((a,b) => b.date.localeCompare(a.date)).slice(0, 4);
+    if (pastSteps.length) {
+      const line = pastSteps.map(s => `${dayLabel(s.date)} ${s.value.toLocaleString()}步`).reverse().join('、');
+      parts.push(`- 這幾天步數：${line}`);
+    }
+    if (pastSleep.length) {
+      const line = pastSleep.map(s => {
+        const h = Math.floor(s.durationMin / 60), m = s.durationMin % 60;
+        return `${dayLabel(s.date)} ${h}h${m}m`;
+      }).reverse().join('、');
+      parts.push(`- 這幾天睡眠：${line}`);
+    }
+    if (pastSteps.length || pastSleep.length) { fitTrendLastSentDate = todayStr; save(); }
+  }
+
   if (!parts.length) return '';
-  return `[今日健康]\n${parts.join('\n')}\n[結束]`;
+  return `[健康]\n${parts.join('\n')}\n[結束]`;
 }
 
 // ── 主動訊息 ──
