@@ -942,6 +942,26 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
 <script>
 // ── State ──
 const SK = 'rp_v5';
+// 註冊 Service Worker：Android Chrome 禁止直接用 new Notification()，
+// 一定要透過 ServiceWorkerRegistration.showNotification()，這裡先把 SW 掛上去。
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(e => console.error('SW 註冊失敗', e));
+}
+// 統一的系統通知函式：optional chaining 確保沒有 SW 支援時退回舊寫法
+async function showNotif(title, body, icon) {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return false;
+  const opts = { body, icon: icon || undefined };
+  try {
+    if ('serviceWorker' in navigator) {
+      const reg = await navigator.serviceWorker.ready;
+      await reg.showNotification(title, opts);
+      return true;
+    }
+  } catch (e) { console.error('showNotification 失敗', e); }
+  // 退回舊寫法（桌機瀏覽器等仍支援直接 new Notification 的環境）
+  try { new Notification(title, opts); return true; } catch (e) { console.error('new Notification 失敗', e); return false; }
+}
+
 let apiKey = '', dsKey = '', oaiKey = '', charName = '', avatarB64 = '', docs = [], instText = '';
 let thinkingEnabled = false;
 let searchEnabled = false;
@@ -1694,11 +1714,7 @@ async function generateProactive(conv) {
     // 若當前正在顯示這對話，更新畫面
     if (currentConvId === conv.id) renderMessages();
     // 系統通知
-    if ('Notification' in window && Notification.permission === 'granted') {
-      try {
-        new Notification(conv.name || charName || '訊息', { body: reply.slice(0, 120), icon: avatarB64 || undefined });
-      } catch(e) {}
-    }
+    showNotif(conv.name || charName || '訊息', reply.slice(0, 120), avatarB64);
     // 觸發壓縮判斷（若對話累積夠了）
     if (currentConvId === conv.id) await maybeCompress();
     return true;
@@ -1777,11 +1793,7 @@ async function generateProactiveMsg() {
     const activePage = document.querySelector('.page.active');
     if (activePage && activePage.dataset.page === 'messages') renderMsgPage();
     // 系統通知
-    if ('Notification' in window && Notification.permission === 'granted') {
-      try {
-        new Notification(charName || '訊息', { body: reply.slice(0, 120), icon: avatarB64 || undefined });
-      } catch(e) {}
-    }
+    showNotif(charName || '訊息', reply.slice(0, 120), avatarB64);
     return true;
   } catch(e) { console.error('proactive msg gen failed', e); return false; }
 }
@@ -1864,11 +1876,7 @@ function pushNotification(text, meta) {
   // 若正在通知窗口就 append
   if (isInNotifView()) renderMessages();
   // 系統通知
-  if ('Notification' in window && Notification.permission === 'granted') {
-    try {
-      new Notification(charName || '提醒', { body: text.slice(0, 120), icon: avatarB64 || undefined });
-    } catch(e) {}
-  }
+  showNotif(charName || '提醒', text.slice(0, 120), avatarB64);
 }
 
 async function checkAndNotify() {
@@ -2680,16 +2688,17 @@ document.getElementById('pg-proactive-msg').addEventListener('change', e=>{
   if (proactiveMsgEnabled) requestNotifPermission();
 });
 updateNotifPermStatus();
-document.getElementById('notif-test-btn').addEventListener('click', ()=>{
+document.getElementById('notif-test-btn').addEventListener('click', async ()=>{
   if (!('Notification' in window)) { alert('此瀏覽器不支援通知'); return; }
   if (Notification.permission === 'granted') {
-    new Notification(charName || '測試', { body: '如果你看到這則通知，代表通知功能正常運作 ✓', icon: avatarB64 || undefined });
+    const ok = await showNotif(charName || '測試', '如果你看到這則通知，代表通知功能正常運作 ✓', avatarB64);
+    if (!ok) alert('通知呼叫失敗，請把畫面截圖給 Claude 看（可能是 Service Worker 還沒註冊成功）。');
   } else if (Notification.permission === 'denied') {
     alert('通知已被封鎖。請到 Android 設定 → 應用程式 → 找到這個 app → 通知，手動開啟。');
   } else {
-    Notification.requestPermission().then(p => {
+    Notification.requestPermission().then(async p => {
       updateNotifPermStatus();
-      if (p === 'granted') new Notification(charName || '測試', { body: '通知功能正常運作 ✓', icon: avatarB64 || undefined });
+      if (p === 'granted') await showNotif(charName || '測試', '通知功能正常運作 ✓', avatarB64);
       else alert('你剛剛拒絕了通知權限，主動訊息將無法跳通知。');
     });
   }
