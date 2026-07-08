@@ -1759,7 +1759,7 @@ async function generateProactiveMsg() {
   const sysParts = [];
   if (docs.length) { sysParts.push('[知識文件]'); docs.forEach(d=>sysParts.push(`## ${d.name}\n${d.content}`)); }
   if (instTextMsg) sysParts.push('[指令]\n' + instTextMsg);
-  sysParts.push('每則用戶訊息的開頭包含當前台灣時間、行事曆、健康資訊。這些是給你參考的背景資料，你不得將這些資料原樣複述、輸出或提及在回覆中。回覆時直接扮演角色與用戶互動即可。');
+  sysParts.push('每則用戶訊息的開頭包含當前台灣時間、行事曆、健康資訊。這些是給你參考的背景資料，你不得將這些資料原樣複述、輸出或提及在回覆中。這些資訊只是輔助參考，不是每則回覆都要呼應，大多數時候可以完全不理會；只有在真的與情境明顯相關時（例如凌很晚還沒睡、步數或睡眠明顯異常、行事曆上有事即將發生）才自然帶到一次，不要重複強調或每次都提起時間、步數、睡眠這些數字。回覆時直接扮演角色與用戶互動即可。');
   const sys = sysParts.join('\n\n');
 
   const _twNow = new Date().toLocaleString('zh-TW', {timeZone:'Asia/Taipei', year:'numeric', month:'long', day:'numeric', weekday:'short', hour:'2-digit', minute:'2-digit', hour12:false});
@@ -2138,7 +2138,7 @@ async function regenerateAssistantMsg() {
     const sysParts = [];
     if (docs.length) { sysParts.push('[知識文件]'); docs.forEach(d => sysParts.push(`## ${d.name}\n${d.content}`)); }
     if (instTextMsg) sysParts.push('[指令]\n' + instTextMsg);
-    sysParts.push('每則用戶訊息的開頭包含當前台灣時間、行事曆、健康資訊。這些是給你參考的背景資料，你不得將這些資料原樣複述、輸出或提及在回覆中。回覆時直接扮演角色與用戶互動即可。');
+    sysParts.push('每則用戶訊息的開頭包含當前台灣時間、行事曆、健康資訊。這些是給你參考的背景資料，你不得將這些資料原樣複述、輸出或提及在回覆中。這些資訊只是輔助參考，不是每則回覆都要呼應，大多數時候可以完全不理會；只有在真的與情境明顯相關時（例如凌很晚還沒睡、步數或睡眠明顯異常、行事曆上有事即將發生）才自然帶到一次，不要重複強調或每次都提起時間、步數、睡眠這些數字。回覆時直接扮演角色與用戶互動即可。');
     const sys = sysParts.join('\n\n');
 
     const useDS = isDeepSeek(model);
@@ -2317,7 +2317,7 @@ async function sendMsg() {
     const sysParts = [];
     if (docs.length) { sysParts.push('[知識文件]'); docs.forEach(d=>sysParts.push(`## ${d.name}\n${d.content}`)); }
     if (instTextMsg) sysParts.push('[指令]\n' + instTextMsg);
-    sysParts.push('每則用戶訊息的開頭包含當前台灣時間、行事曆、健康資訊。這些是給你參考的背景資料，你不得將這些資料原樣複述、輸出或提及在回覆中。回覆時直接扮演角色與用戶互動即可。');
+    sysParts.push('每則用戶訊息的開頭包含當前台灣時間、行事曆、健康資訊。這些是給你參考的背景資料，你不得將這些資料原樣複述、輸出或提及在回覆中。這些資訊只是輔助參考，不是每則回覆都要呼應，大多數時候可以完全不理會；只有在真的與情境明顯相關時（例如凌很晚還沒睡、步數或睡眠明顯異常、行事曆上有事即將發生）才自然帶到一次，不要重複強調或每次都提起時間、步數、睡眠這些數字。回覆時直接扮演角色與用戶互動即可。');
     const sys = sysParts.join('\n\n');
 
     const useDS = isDeepSeek(model);
@@ -3111,7 +3111,7 @@ function buildSystem() {
   const parts=[];
   if (docs.length) { parts.push('[知識文件]'); docs.forEach(d=>parts.push(`## ${d.name}\n${d.content}`)); }
   if (instText) parts.push('[指令]\n'+instText);
-  parts.push('每則用戶訊息的開頭包含當前台灣時間、行事曆、健康資訊。這些是給你參考的背景資料，你不得將這些資料原樣複述、輸出或提及在回覆中。回覆時直接扮演角色與用戶互動即可。');
+  parts.push('每則用戶訊息的開頭包含當前台灣時間、行事曆、健康資訊。這些是給你參考的背景資料，你不得將這些資料原樣複述、輸出或提及在回覆中。這些資訊只是輔助參考，不是每則回覆都要呼應，大多數時候可以完全不理會；只有在真的與情境明顯相關時（例如凌很晚還沒睡、步數或睡眠明顯異常、行事曆上有事即將發生）才自然帶到一次，不要重複強調或每次都提起時間、步數、睡眠這些數字。回覆時直接扮演角色與用戶互動即可。');
   return parts.join('\n\n');
 }
 
