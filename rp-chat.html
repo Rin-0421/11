@@ -2731,9 +2731,11 @@ document.getElementById('notif-test-btn').addEventListener('click', async ()=>{
   }
 });
 
-document.getElementById('cal-refresh-btn').addEventListener('click', ()=>{
-  // 重新登入以拿新快照（因為 token 過期後靜默續期可能無效）
-  gcalConnect();
+document.getElementById('cal-refresh-btn').addEventListener('click', async ()=>{
+  // 先試靜默續期（不會跳出任何畫面），失敗才退回完整登入畫面
+  const ok = await ensureGcalToken();
+  if (ok) { await fetchGcalEvents(); }
+  else { gcalConnect(); }
 });
 
 // 設定頁：儲存
