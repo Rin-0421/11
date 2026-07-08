@@ -726,6 +726,10 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
         通知權限狀態：<span id="notif-perm-status" style="font-weight:600">檢查中…</span>
         <button class="btn-sm" id="notif-test-btn" style="margin-left:6px;padding:2px 8px;font-size:11px">測試通知</button>
       </div>
+      <div style="font-size:11px;margin-bottom:8px;padding:8px;border-radius:8px;background:var(--surface2);line-height:1.5">
+        背景喚醒狀態：<span id="bgsync-status" style="font-weight:600">檢查中…</span><br>
+        <span style="color:var(--text-dim)">（app 沒開時能不能自己醒來傳訊息，實際間隔由 Chrome 決定，不保證準時）</span>
+      </div>
       <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:6px 0;border-bottom:1px solid var(--border);margin-bottom:8px">
         <span style="font-size:13px;font-weight:600">📩 聊天頁（訊息模式）</span>
         <input type="checkbox" id="pg-proactive-msg" style="width:44px;height:24px;cursor:pointer">
@@ -960,6 +964,29 @@ async function showNotif(title, body, icon) {
   } catch (e) { console.error('showNotification 失敗', e); }
   // 退回舊寫法（桌機瀏覽器等仍支援直接 new Notification 的環境）
   try { new Notification(title, opts); return true; } catch (e) { console.error('new Notification 失敗', e); return false; }
+}
+
+// ── Periodic Background Sync：讓 app 沒開時也能自己醒來檢查主動訊息 ──
+async function registerBgSync() {
+  const el = document.getElementById('bgsync-status');
+  const setStatus = (text, color) => { if (el) { el.textContent = text; el.style.color = color; } };
+  if (!('serviceWorker' in navigator) || !('periodicSync' in (window.ServiceWorkerRegistration ? ServiceWorkerRegistration.prototype : {}))) {
+    setStatus('此瀏覽器不支援（需要 Android Chrome）', '#c0392b');
+    return;
+  }
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const status = await navigator.permissions.query({ name: 'periodic-background-sync' });
+    if (status.state !== 'granted') {
+      setStatus('未授權（需以 app 形式安裝並常用一段時間，Chrome 才會開放）', '#c0392b');
+      return;
+    }
+    await reg.periodicSync.register('proactive-check', { minInterval: 30 * 60 * 1000 });
+    setStatus('已註冊 ✓（實際喚醒頻率由 Chrome 決定）', '#2e7d32');
+  } catch (e) {
+    console.error('背景喚醒註冊失敗', e);
+    setStatus('註冊失敗：' + (e.message || e), '#c0392b');
+  }
 }
 
 let apiKey = '', dsKey = '', oaiKey = '', charName = '', avatarB64 = '', docs = [], instText = '';
@@ -2712,9 +2739,10 @@ document.getElementById('pg-notif-toggle').addEventListener('change', e=>{
 document.getElementById('pg-proactive-msg').addEventListener('change', e=>{
   proactiveMsgEnabled = e.target.checked;
   save();
-  if (proactiveMsgEnabled) requestNotifPermission();
+  if (proactiveMsgEnabled) { requestNotifPermission(); registerBgSync(); }
 });
 updateNotifPermStatus();
+registerBgSync();
 document.getElementById('notif-test-btn').addEventListener('click', async ()=>{
   if (!('Notification' in window)) { alert('此瀏覽器不支援通知'); return; }
   if (Notification.permission === 'granted') {
