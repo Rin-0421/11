@@ -1080,6 +1080,7 @@ async function loadState() {
       gcalSnapshotTime = s.gcalSnapshotTime || 0;
       fitInject = !!s.fitInject;
       fitData = s.fitData || { heart: [], steps: [], sleep: [] };
+      fitData.sleep = dedupSleepByDate(fitData.sleep || []);
       fitSnapshotTime = s.fitSnapshotTime || 0;
       fitTrendLastSentDate = s.fitTrendLastSentDate || '';
       proactiveConvIds = Array.isArray(s.proactiveConvIds) ? s.proactiveConvIds : [];
@@ -1442,6 +1443,19 @@ function buildGcalContext() {
 
 
 // ── Google Fit ──
+// 同一天可能會有多筆睡眠紀錄（例如手環誤判產生的短睡眠、或分段睡眠），
+// 這裡只保留每一天「時長最長」的那一筆，避免把錯誤的短紀錄顯示出來或傳給模型。
+function dedupSleepByDate(list) {
+  const byDate = {};
+  for (const s of (list || [])) {
+    if (!s || !s.date) continue;
+    if (!byDate[s.date] || s.durationMin > byDate[s.date].durationMin) {
+      byDate[s.date] = s;
+    }
+  }
+  return Object.values(byDate).sort((a, b) => a.date.localeCompare(b.date));
+}
+
 async function fetchFitData() {
   if (!gcalToken) { console.log('[fit] no token'); return; }
   console.log('[fit] start fetching');
@@ -1507,7 +1521,7 @@ async function fetchFitData() {
     if (sleepRes.ok) {
       const d = await sleepRes.json();
       console.log('[fit] sleep sessions:', d.session?.length);
-      fitData.sleep = (d.session || []).map(s => {
+      const rawSleep = (d.session || []).map(s => {
         const start = new Date(parseInt(s.startTimeMillis));
         const end = new Date(parseInt(s.endTimeMillis));
         const durationMin = Math.round((end - start) / 60000);
@@ -1518,6 +1532,8 @@ async function fetchFitData() {
           durationMin
         };
       });
+      // 同一天若有多筆睡眠紀錄，只保留時長最長的一筆（過濾手環誤判的短紀錄）
+      fitData.sleep = dedupSleepByDate(rawSleep);
     }
 
     fitSnapshotTime = Date.now();
@@ -1570,7 +1586,7 @@ function renderFitPage() {
   }
 }
 
-function buildFitContext() {
+function buildFitContext(conv) {
   if (!fitInject) return '';
   const todayStr = new Date().toISOString().slice(0, 10);
   const dayLabels = ['今天','昨天','前天','大前天'];
@@ -1583,17 +1599,17 @@ function buildFitContext() {
 
   // 今日資料每次都帶（唯一會隨時間即時變動的部分）
   const todaySteps = fitData.steps.find(s => s.date === todayStr);
-  const todayHeart = fitData.heart.find(h => h.date === todayStr);
   const todaySleep = fitData.sleep.find(s => s.date === todayStr);
   if (todaySteps) parts.push(`- 今日步數：${todaySteps.value.toLocaleString()}`);
-  if (todayHeart && todayHeart.points) parts.push(`- 今日活動量：${todayHeart.points} Heart Points`);
   if (todaySleep) {
     const h = Math.floor(todaySleep.durationMin / 60), m = todaySleep.durationMin % 60;
     parts.push(`- 昨晚睡眠：${todaySleep.startTime} → ${todaySleep.endTime}（${h}h${m}m）`);
   }
 
-  // 過去幾天的趨勢是定值，一天只附一次，避免每則訊息都重複灌一樣的舊資料
-  if (fitTrendLastSentDate !== todayStr) {
+  // 過去幾天的趨勢是定值，「每個窗口」當天第一次發送訊息才附帶一次，避免同一天重複灌一樣的舊資料
+  // 有傳入 conv（角色扮演的聊天窗口）時，各窗口各自記錄；沒有 conv（單一的「聊天」頁面）則用全域記錄
+  const lastSentDate = conv ? (conv.fitTrendDate || '') : fitTrendLastSentDate;
+  if (lastSentDate !== todayStr) {
     const pastSteps = fitData.steps.filter(s => s.date !== todayStr).sort((a,b) => b.date.localeCompare(a.date)).slice(0, 4);
     const pastSleep = fitData.sleep.filter(s => s.date !== todayStr).sort((a,b) => b.date.localeCompare(a.date)).slice(0, 4);
     if (pastSteps.length) {
@@ -1607,7 +1623,10 @@ function buildFitContext() {
       }).reverse().join('、');
       parts.push(`- 這幾天睡眠：${line}`);
     }
-    if (pastSteps.length || pastSleep.length) { fitTrendLastSentDate = todayStr; save(); }
+    if (pastSteps.length || pastSleep.length) {
+      if (conv) conv.fitTrendDate = todayStr; else fitTrendLastSentDate = todayStr;
+      save();
+    }
   }
 
   if (!parts.length) return '';
@@ -1720,7 +1739,7 @@ async function generateProactive(conv) {
   const sys = buildSystem();
   const _twNow = new Date().toLocaleString('zh-TW', {timeZone:'Asia/Taipei', year:'numeric', month:'long', day:'numeric', weekday:'short', hour:'2-digit', minute:'2-digit', hour12:false});
   const _gcalCtx = buildGcalContext();
-  const _fitCtx = buildFitContext();
+  const _fitCtx = buildFitContext(conv);
   const contextParts = [`[當前台灣時間：${_twNow}]`];
   if (_gcalCtx) contextParts.push(_gcalCtx);
   if (_fitCtx) contextParts.push(_fitCtx);
@@ -3204,7 +3223,7 @@ async function send() {
     if (_lastUserIdx >= 0) {
       const _um = apiMessages[_lastUserIdx];
       const _gcalCtx = buildGcalContext();
-      const _fitCtx = buildFitContext();
+      const _fitCtx = buildFitContext(conv);
       const _tp = `[當前台灣時間：${_apiTwTime}]${_gcalCtx ? '\n' + _gcalCtx : ''}${_fitCtx ? '\n' + _fitCtx : ''}\n`;
       if (typeof _um.content === 'string') {
         apiMessages[_lastUserIdx] = { ..._um, content: _tp + _um.content };
@@ -3443,7 +3462,7 @@ async function regenerateFrom(historyIdx) {
     if (_lastUserIdx >= 0) {
       const _um = apiMessages[_lastUserIdx];
       const _gcalCtx = buildGcalContext();
-      const _fitCtx = buildFitContext();
+      const _fitCtx = buildFitContext(conv);
       const _tp = `[當前台灣時間：${_apiTwTime}]${_gcalCtx ? '\n' + _gcalCtx : ''}${_fitCtx ? '\n' + _fitCtx : ''}\n`;
       if (typeof _um.content === 'string') {
         apiMessages[_lastUserIdx] = { ..._um, content: _tp + _um.content };
