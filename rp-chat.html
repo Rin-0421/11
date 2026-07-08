@@ -1116,6 +1116,8 @@ loadState();
 // ── Save ──
 async function save() {
   try {
+    const msgModelSel = document.getElementById('msg-model-select');
+    if (msgModelSel) msgModel = msgModelSel.value;
     await idbSet(SK, {
       apiKey, dsKey, oaiKey, charName, avatarB64, docs, instText, thinkingEnabled, searchEnabled,
       darkMode, gcalClientId, gcalInject, gcalEvents, gcalSnapshotTime,
@@ -1777,6 +1779,9 @@ async function generateProactive(conv) {
 
 
 async function generateProactiveMsg() {
+  // 直接從 select 讀取當前值（防止 msgModel 未同步，跟手動傳送保持一致）
+  const sel = document.getElementById('msg-model-select');
+  if (sel) msgModel = sel.value;
   const model = msgModel;
   const useDS = isDeepSeek(model);
   const useOAI = isOpenAI(model);
