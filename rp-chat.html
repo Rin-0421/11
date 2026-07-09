@@ -1052,6 +1052,7 @@ async function idbSet(key, value) {
 
 // ── Load（含舊版 localStorage 資料自動搬遷）──
 async function loadState() {
+  let globalSavedModel = 'claude-sonnet-4-6';
   try {
     let s = await idbGet(SK);
     if (!s) {
@@ -1098,13 +1099,21 @@ async function loadState() {
       applyDarkMode();
       conversations = s.conversations || [];
       currentConvId = s.currentConvId || null;
-      const savedModel = s.model || 'claude-sonnet-4-6';
-      const modelEl = document.getElementById('chat-model');
-      if (modelEl) modelEl.value = savedModel;
+      globalSavedModel = s.model || 'claude-sonnet-4-6';
     }
     if (!conversations.length) conversations.push({ id: uid(), name: '對話 1', history: [] });
     if (!currentConvId || !conversations.find(c=>c.id===currentConvId))
       currentConvId = conversations[0].id;
+    // 用「目前這個對話」自己儲存的 model 還原下拉選單，而不是用全域舊值蓋掉，
+    // 避免每次重新整理/重開 app 時被重置成 Sonnet 4.6
+    {
+      const conv = currentConv();
+      const modelEl = document.getElementById('chat-model');
+      if (conv && modelEl) {
+        if (!conv.model) conv.model = globalSavedModel;
+        modelEl.value = conv.model;
+      }
+    }
     initHome();
     renderConvList();
     renderMessages();
@@ -3202,7 +3211,7 @@ async function send() {
   const tb=addBubble('assistant','正在輸入…',true,null,null,-1);
 
   try {
-    const model=document.getElementById('chat-model').value;
+    const model=conv.model || document.getElementById('chat-model').value;
     const sys=buildSystem();
     const apiMessages=conv.history.filter(m=>!m._notice).map(m=>{
       if (Array.isArray(m.content)) {
@@ -3441,7 +3450,7 @@ async function regenerateFrom(historyIdx) {
   const tb=addBubble('assistant','正在輸入…',true,null,null,-1);
 
   try {
-    const model=document.getElementById('chat-model').value;
+    const model=conv.model || document.getElementById('chat-model').value;
     const sys=buildSystem();
     const apiMessages=conv.history.filter(m=>!m._notice).map(m=>{
       if (Array.isArray(m.content)) {
