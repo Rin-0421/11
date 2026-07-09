@@ -779,10 +779,6 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
     </div>
     <div id="fit-content">
       <details class="fit-block">
-        <summary class="fit-summary">❤ 活動量（Heart Points）</summary>
-        <div class="fit-body" id="fit-heart-body"></div>
-      </details>
-      <details class="fit-block">
         <summary class="fit-summary">👟 步數</summary>
         <div class="fit-body" id="fit-steps-body"></div>
       </details>
@@ -791,6 +787,16 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
         <div class="fit-body" id="fit-sleep-body"></div>
       </details>
     </div>
+    <details class="fit-block" open>
+      <summary class="fit-summary">⚖️ 體重</summary>
+      <div class="fit-body">
+        <div style="display:flex;gap:8px;padding:10px 12px">
+          <input type="number" id="weight-input" placeholder="輸入公斤數" step="0.1" min="0" style="flex:1;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:14px">
+          <button id="weight-add-btn" style="padding:8px 16px;border-radius:8px;border:none;background:var(--accent);color:#fff;font-size:14px;white-space:nowrap">新增</button>
+        </div>
+        <div id="fit-weight-body"></div>
+      </div>
+    </details>
   </div>
 </div>
 
@@ -994,7 +1000,7 @@ let conversations = []; // [{ id, name, history }]
 let currentConvId = null;
 let pendingFiles = [], isLoading = false, abortCtrl = null, darkMode = false;
 let gcalClientId = '', gcalToken = null, gcalTokenExpiry = 0, gcalInject = false, gcalEvents = [], gcalTokenClient = null, gcalSnapshotTime = 0;
-let fitInject = false, fitData = { heart: [], steps: [], sleep: [] }, fitSnapshotTime = 0, fitTrendLastSentDate = '';
+let fitInject = false, fitData = { steps: [], sleep: [], weight: [] }, fitSnapshotTime = 0, fitTrendLastSentDate = '';
 let proactiveConvIds = [], proactiveState = { lastCheckDate: '', dailyCounts: {} }, proactiveTimer = null;
 let notifications = [], notifEnabled = false, notifLeadMin = 10, notifCheckTimer = null, notifiedIds = new Set();
 let instTextMsg = '', msgHistory = [], msgArchives = [], msgPendingFiles = [], proactiveMsgEnabled = false, msgModel = 'claude-sonnet-4-6';
@@ -1078,7 +1084,8 @@ async function loadState() {
       gcalEvents = Array.isArray(s.gcalEvents) ? s.gcalEvents : [];
       gcalSnapshotTime = s.gcalSnapshotTime || 0;
       fitInject = !!s.fitInject;
-      fitData = s.fitData || { heart: [], steps: [], sleep: [] };
+      fitData = s.fitData || { steps: [], sleep: [], weight: [] };
+      if (!Array.isArray(fitData.weight)) fitData.weight = [];
       fitData.sleep = dedupSleepByDate(fitData.sleep || []);
       fitSnapshotTime = s.fitSnapshotTime || 0;
       fitTrendLastSentDate = s.fitTrendLastSentDate || '';
@@ -1283,7 +1290,7 @@ function initGcalClient() {
   try {
     gcalTokenClient = google.accounts.oauth2.initTokenClient({
       client_id: gcalClientId,
-      scope: 'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/fitness.activity.read https://www.googleapis.com/auth/fitness.heart_rate.read https://www.googleapis.com/auth/fitness.sleep.read',
+      scope: 'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/fitness.activity.read https://www.googleapis.com/auth/fitness.sleep.read',
       callback: (resp) => {
         if (resp.access_token) {
           gcalToken = resp.access_token;
@@ -1496,27 +1503,6 @@ async function fetchFitData() {
       }));
     }
 
-    // Heart Points：按天聚合
-    const hpRes = await fetch('https://www.googleapis.com/fitness/v1/users/me/dataset:aggregate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${gcalToken}` },
-      body: JSON.stringify({
-        aggregateBy: [{ dataTypeName: 'com.google.heart_minutes' }],
-        bucketByTime: { durationMillis: 86400000 },
-        startTimeMillis: startMs, endTimeMillis: endMs
-      })
-    });
-    console.log('[fit] hp status:', hpRes.status);
-    if (!hpRes.ok) { const t = await hpRes.text(); console.error('[fit] hp err:', t); }
-    if (hpRes.ok) {
-      const d = await hpRes.json();
-      console.log('[fit] hp buckets:', d.bucket?.length);
-      fitData.heart = (d.bucket || []).map(b => ({
-        date: new Date(parseInt(b.startTimeMillis) + 8*3600000).toISOString().slice(0, 10),
-        points: Math.round(b.dataset[0]?.point?.reduce((s, p) => s + (p.value[0]?.fpVal || 0), 0) || 0)
-      }));
-    }
-
     // 睡眠：session
     const sleepStart = new Date(startMs).toISOString();
     const sleepEnd = new Date(endMs).toISOString();
@@ -1552,22 +1538,12 @@ async function fetchFitData() {
 function renderFitPage() {
   const nc = document.getElementById('fit-not-connected');
   const content = document.getElementById('fit-content');
+  renderWeightBody(); // 體重是手動輸入，不受 Google 連接狀態影響，永遠渲染
   if (!nc || !content) return;
   const hasData = fitSnapshotTime > 0;
   nc.style.display = hasData ? 'none' : 'block';
   content.style.display = hasData ? 'block' : 'none';
   if (!hasData) return;
-
-  // Heart Points
-  const heartBody = document.getElementById('fit-heart-body');
-  if (!fitData.heart.length || fitData.heart.every(h => !h.points)) {
-    heartBody.innerHTML = '<div class="fit-empty">沒有活動資料</div>';
-  } else {
-    heartBody.innerHTML = fitData.heart.slice(-5).reverse().map(h => {
-      const label = new Date(h.date).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric', weekday: 'short' });
-      return `<div class="fit-row"><div class="fit-row-date">${label}</div><div class="fit-row-val">${h.points || 0} pts</div></div>`;
-    }).join('');
-  }
 
   // 步數
   const stepsBody = document.getElementById('fit-steps-body');
@@ -1593,7 +1569,49 @@ function renderFitPage() {
   }
 }
 
-// 每個「窗口」當天第一次發送訊息時，自動附帶一次「今天」的步數/睡眠（不含心跳指數）。
+// ── 體重（手動輸入，最多保留 5 筆） ──
+function renderWeightBody() {
+  const body = document.getElementById('fit-weight-body');
+  if (!body) return;
+  if (!fitData.weight || !fitData.weight.length) {
+    body.innerHTML = '<div class="fit-empty">還沒有體重紀錄</div>';
+    return;
+  }
+  body.innerHTML = fitData.weight.map((w, idx) => {
+    const label = new Date(w.date).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric', weekday: 'short' });
+    return `<div class="fit-row"><div class="fit-row-date">${label}</div><div class="fit-row-val">${w.value} kg <button class="weight-del-btn" data-idx="${idx}" style="margin-left:8px;border:none;background:none;color:var(--text-dim);cursor:pointer;font-size:12px">✕</button></div></div>`;
+  }).reverse().join('');
+  body.querySelectorAll('.weight-del-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const idx = parseInt(btn.dataset.idx, 10);
+      fitData.weight.splice(idx, 1);
+      save();
+      renderWeightBody();
+    });
+  });
+}
+
+function addWeightEntry() {
+  const input = document.getElementById('weight-input');
+  if (!input) return;
+  const val = parseFloat(input.value);
+  if (!val || val <= 0) return;
+  if (!Array.isArray(fitData.weight)) fitData.weight = [];
+  const dateStr = new Date().toISOString().slice(0, 10);
+  // 同一天重複輸入就覆蓋掉，而不是塞好幾筆進去
+  const existingIdx = fitData.weight.findIndex(w => w.date === dateStr);
+  if (existingIdx >= 0) fitData.weight[existingIdx] = { date: dateStr, value: val };
+  else fitData.weight.push({ date: dateStr, value: val });
+  fitData.weight.sort((a, b) => a.date.localeCompare(b.date));
+  if (fitData.weight.length > 5) fitData.weight = fitData.weight.slice(-5); // 最多保留 5 筆
+  input.value = '';
+  save();
+  renderWeightBody();
+}
+document.getElementById('weight-add-btn')?.addEventListener('click', addWeightEntry);
+document.getElementById('weight-input')?.addEventListener('keydown', e => { if (e.key === 'Enter') addWeightEntry(); });
+
+// 每個「窗口」當天第一次發送訊息時，自動附帶一次「今天」的步數/睡眠。
 // 之後同一天內想再看健康資料，改由模型自己判斷要不要呼叫 get_today_health / get_recent_health 工具。
 function buildFitContext(conv) {
   if (!fitInject) return '';
@@ -1616,18 +1634,28 @@ function buildFitContext(conv) {
   return `[健康]\n${parts.join('\n')}\n（如需更完整的健康資訊，可以呼叫 get_today_health 或 get_recent_health 工具查詢，不需要主動提起也可以）\n[結束]`;
 }
 
-// 供模型自己選擇調用的健康資料工具（僅步數/睡眠，心跳指數/活動量一律不提供）
+// 供模型自己選擇調用的健康資料工具
 function getHealthTools() {
   if (!fitInject) return [];
   return [
     {
       name: 'get_today_health',
-      description: '查詢使用者「今天」的步數與睡眠資料。不包含心跳指數/活動量。',
+      description: '查詢使用者「今天」的步數與睡眠資料。',
       input_schema: { type: 'object', properties: {} }
     },
     {
       name: 'get_recent_health',
-      description: '查詢使用者「最近 5 天（含今天）」的步數與睡眠趨勢，可用來判斷最近作息、活動量的變化。不包含心跳指數/活動量。',
+      description: '查詢使用者「最近 5 天（含今天）」的步數與睡眠趨勢，可用來判斷最近作息、活動量的變化。',
+      input_schema: { type: 'object', properties: {} }
+    },
+    {
+      name: 'get_latest_weight',
+      description: '查詢使用者「最新一筆」體重紀錄（使用者手動輸入的資料）。',
+      input_schema: { type: 'object', properties: {} }
+    },
+    {
+      name: 'get_weight_history',
+      description: '查詢使用者「全部體重紀錄」（最多 5 筆，使用者手動輸入的資料），可用來判斷體重變化趨勢。',
       input_schema: { type: 'object', properties: {} }
     }
   ];
@@ -1641,7 +1669,7 @@ function getHealthToolsOpenAI() {
       type: 'function',
       function: {
         name: 'get_today_health',
-        description: '查詢使用者「今天」的步數與睡眠資料。不包含心跳指數/活動量。',
+        description: '查詢使用者「今天」的步數與睡眠資料。',
         parameters: { type: 'object', properties: {} }
       }
     },
@@ -1649,7 +1677,23 @@ function getHealthToolsOpenAI() {
       type: 'function',
       function: {
         name: 'get_recent_health',
-        description: '查詢使用者「最近 5 天（含今天）」的步數與睡眠趨勢，可用來判斷最近作息、活動量的變化。不包含心跳指數/活動量。',
+        description: '查詢使用者「最近 5 天（含今天）」的步數與睡眠趨勢，可用來判斷最近作息、活動量的變化。',
+        parameters: { type: 'object', properties: {} }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'get_latest_weight',
+        description: '查詢使用者「最新一筆」體重紀錄（使用者手動輸入的資料）。',
+        parameters: { type: 'object', properties: {} }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'get_weight_history',
+        description: '查詢使用者「全部體重紀錄」（最多 5 筆，使用者手動輸入的資料），可用來判斷體重變化趨勢。',
         parameters: { type: 'object', properties: {} }
       }
     }
@@ -1689,6 +1733,15 @@ function executeHealthTool(name) {
       }).reverse().join('、'));
     }
     return parts.length ? parts.join('\n') : '目前沒有最近幾天的步數/睡眠資料。';
+  }
+  if (name === 'get_latest_weight') {
+    if (!fitData.weight || !fitData.weight.length) return '使用者目前沒有輸入過體重紀錄。';
+    const latest = fitData.weight[fitData.weight.length - 1];
+    return `最新體重紀錄（${latest.date}）：${latest.value} kg`;
+  }
+  if (name === 'get_weight_history') {
+    if (!fitData.weight || !fitData.weight.length) return '使用者目前沒有輸入過體重紀錄。';
+    return '體重紀錄（由舊到新）：' + fitData.weight.map(w => `${w.date} ${w.value}kg`).join('、');
   }
   return '（未知的健康工具）';
 }
