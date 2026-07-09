@@ -1595,51 +1595,99 @@ function renderFitPage() {
   }
 }
 
+// 每個「窗口」當天第一次發送訊息時，自動附帶一次「今天」的步數/睡眠（不含心跳指數）。
+// 之後同一天內想再看健康資料，改由模型自己判斷要不要呼叫 get_today_health / get_recent_health 工具。
 function buildFitContext(conv) {
   if (!fitInject) return '';
   const todayStr = new Date().toISOString().slice(0, 10);
-  const dayLabels = ['今天','昨天','前天','大前天'];
-  const dayLabel = (dateStr) => {
-    const idx = Math.round((new Date(todayStr) - new Date(dateStr)) / 86400000);
-    return dayLabels[idx] || `${idx}天前`;
-  };
+  const lastSentDate = conv ? (conv.fitTrendDate || '') : fitTrendLastSentDate;
+  if (lastSentDate === todayStr) return '';
 
-  const parts = [];
-
-  // 今日資料每次都帶（唯一會隨時間即時變動的部分）
   const todaySteps = fitData.steps.find(s => s.date === todayStr);
   const todaySleep = fitData.sleep.find(s => s.date === todayStr);
+  const parts = [];
   if (todaySteps) parts.push(`- 今日步數：${todaySteps.value.toLocaleString()}`);
   if (todaySleep) {
     const h = Math.floor(todaySleep.durationMin / 60), m = todaySleep.durationMin % 60;
     parts.push(`- 昨晚睡眠：${todaySleep.startTime} → ${todaySleep.endTime}（${h}h${m}m）`);
   }
+  if (!parts.length) return '';
 
-  // 過去幾天的趨勢是定值，「每個窗口」當天第一次發送訊息才附帶一次，避免同一天重複灌一樣的舊資料
-  // 有傳入 conv（角色扮演的聊天窗口）時，各窗口各自記錄；沒有 conv（單一的「聊天」頁面）則用全域記錄
-  const lastSentDate = conv ? (conv.fitTrendDate || '') : fitTrendLastSentDate;
-  if (lastSentDate !== todayStr) {
-    const pastSteps = fitData.steps.filter(s => s.date !== todayStr).sort((a,b) => b.date.localeCompare(a.date)).slice(0, 4);
-    const pastSleep = fitData.sleep.filter(s => s.date !== todayStr).sort((a,b) => b.date.localeCompare(a.date)).slice(0, 4);
-    if (pastSteps.length) {
-      const line = pastSteps.map(s => `${dayLabel(s.date)} ${s.value.toLocaleString()}步`).reverse().join('、');
-      parts.push(`- 這幾天步數：${line}`);
+  if (conv) conv.fitTrendDate = todayStr; else fitTrendLastSentDate = todayStr;
+  save();
+  return `[健康]\n${parts.join('\n')}\n（如需更完整的健康資訊，可以呼叫 get_today_health 或 get_recent_health 工具查詢，不需要主動提起也可以）\n[結束]`;
+}
+
+// 供模型自己選擇調用的健康資料工具（僅步數/睡眠，心跳指數/活動量一律不提供）
+function getHealthTools() {
+  if (!fitInject) return [];
+  return [
+    {
+      name: 'get_today_health',
+      description: '查詢使用者「今天」的步數與睡眠資料。不包含心跳指數/活動量。',
+      input_schema: { type: 'object', properties: {} }
+    },
+    {
+      name: 'get_recent_health',
+      description: '查詢使用者「最近 5 天（含今天）」的步數與睡眠趨勢，可用來判斷最近作息、活動量的變化。不包含心跳指數/活動量。',
+      input_schema: { type: 'object', properties: {} }
     }
-    if (pastSleep.length) {
-      const line = pastSleep.map(s => {
+  ];
+}
+
+// 實際執行健康工具查詢，回傳給模型的文字內容
+function executeHealthTool(name) {
+  const todayStr = new Date().toISOString().slice(0, 10);
+  if (name === 'get_today_health') {
+    const todaySteps = fitData.steps.find(s => s.date === todayStr);
+    const todaySleep = fitData.sleep.find(s => s.date === todayStr);
+    const parts = [];
+    if (todaySteps) parts.push(`今日步數：${todaySteps.value.toLocaleString()}`);
+    if (todaySleep) {
+      const h = Math.floor(todaySleep.durationMin / 60), m = todaySleep.durationMin % 60;
+      parts.push(`昨晚睡眠：${todaySleep.startTime} → ${todaySleep.endTime}（${h}h${m}m）`);
+    }
+    return parts.length ? parts.join('\n') : '目前沒有今天的步數/睡眠資料。';
+  }
+  if (name === 'get_recent_health') {
+    const dayLabels = ['今天','昨天','前天','大前天'];
+    const dayLabel = (dateStr) => {
+      const idx = Math.round((new Date(todayStr) - new Date(dateStr)) / 86400000);
+      return dayLabels[idx] || `${idx}天前`;
+    };
+    const recentSteps = fitData.steps.filter(s => s.date <= todayStr).sort((a,b) => b.date.localeCompare(a.date)).slice(0, 5);
+    const recentSleep = fitData.sleep.filter(s => s.date <= todayStr).sort((a,b) => b.date.localeCompare(a.date)).slice(0, 5);
+    const parts = [];
+    if (recentSteps.length) {
+      parts.push('這幾天步數：' + recentSteps.map(s => `${dayLabel(s.date)} ${s.value.toLocaleString()}步`).reverse().join('、'));
+    }
+    if (recentSleep.length) {
+      parts.push('這幾天睡眠：' + recentSleep.map(s => {
         const h = Math.floor(s.durationMin / 60), m = s.durationMin % 60;
         return `${dayLabel(s.date)} ${h}h${m}m`;
-      }).reverse().join('、');
-      parts.push(`- 這幾天睡眠：${line}`);
+      }).reverse().join('、'));
     }
-    if (pastSteps.length || pastSleep.length) {
-      if (conv) conv.fitTrendDate = todayStr; else fitTrendLastSentDate = todayStr;
-      save();
-    }
+    return parts.length ? parts.join('\n') : '目前沒有最近幾天的步數/睡眠資料。';
   }
+  return '（未知的健康工具）';
+}
 
-  if (!parts.length) return '';
-  return `[健康]\n${parts.join('\n')}\n[結束]`;
+// 在 Claude 的 messages 陣列最後一則訊息加上 cache_control 斷點，讓「這則之前的所有歷史」被快取。
+// 只影響傳給 Claude 的訊息副本，不影響原本共用的 apiMessages（DeepSeek/OpenAI 分支不受影響）。
+function addHistoryCacheBreakpoint(messages) {
+  if (!messages.length) return messages;
+  const lastIdx = messages.length - 1;
+  return messages.map((m, i) => {
+    if (i !== lastIdx) return m;
+    const content = typeof m.content === 'string' ? [{ type: 'text', text: m.content }] : m.content.map(b => ({ ...b }));
+    for (let j = content.length - 1; j >= 0; j--) {
+      if (content[j].type === 'text') {
+        content[j] = { ...content[j], cache_control: { type: 'ephemeral' } };
+        return { ...m, content };
+      }
+    }
+    return m;
+  });
 }
 
 // ── 主動訊息 ──
@@ -1782,14 +1830,15 @@ async function generateProactive(conv) {
       const d = await res.json();
       reply = d.choices?.[0]?.message?.content || '';
     } else {
-      // Claude：明確關閉思考
-      body = { model, max_tokens: 2000, system: sys || undefined, messages: apiMessages };
+      // Claude：明確關閉思考；system + 歷史都做快取，並提供健康工具
+      const claudeMessages = addHistoryCacheBreakpoint(apiMessages);
+      body = { model, max_tokens: 2000 };
+      if (sys) body.system = [{ type:'text', text:sys, cache_control:{ type:'ephemeral' } }];
+      const _tools = getHealthTools();
+      if (_tools.length) body.tools = _tools;
       headers = { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' };
       url = 'https://api.anthropic.com/v1/messages';
-      const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
-      if (!res.ok) return false;
-      const d = await res.json();
-      reply = d.content?.find(b => b.type==='text')?.text || '';
+      reply = await runClaudeWithToolsNonStream(claudeMessages, body, headers, url);
     }
     if (!reply) return false;
     const time = nowTW();
@@ -1864,13 +1913,14 @@ async function generateProactiveMsg() {
       const d = await res.json();
       reply = d.choices?.[0]?.message?.content || '';
     } else {
-      body = { model, max_tokens: 2000, system: sys || undefined, messages: apiMessages };
+      const claudeMessages = addHistoryCacheBreakpoint(apiMessages);
+      body = { model, max_tokens: 2000 };
+      if (sys) body.system = [{ type:'text', text:sys, cache_control:{ type:'ephemeral' } }];
+      const _tools = getHealthTools();
+      if (_tools.length) body.tools = _tools;
       headers = { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' };
       url = 'https://api.anthropic.com/v1/messages';
-      const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
-      if (!res.ok) return false;
-      const d = await res.json();
-      reply = d.content?.find(b => b.type==='text')?.text || '';
+      reply = await runClaudeWithToolsNonStream(claudeMessages, body, headers, url);
     }
     if (!reply) return false;
     const time = nowTW();
@@ -2255,7 +2305,7 @@ async function regenerateAssistantMsg() {
       }
     }
 
-    let body, headers, url;
+    let body, headers, url, claudeMessages;
     if (useDS) {
       body = { model, max_tokens: thinkingEnabled ? 8000 : 2048, stream: true, messages: [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages] };
       headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
@@ -2265,14 +2315,21 @@ async function regenerateAssistantMsg() {
       headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
       url = 'https://api.openai.com/v1/chat/completions';
     } else {
-      body = { model, max_tokens: thinkingEnabled ? 16000 : 2048, stream: true, system: sys || undefined, messages: apiMessages };
+      claudeMessages = addHistoryCacheBreakpoint(apiMessages);
+      body = { model, max_tokens: thinkingEnabled ? 16000 : 2048, stream: true };
+      if (sys) body.system = [{ type:'text', text:sys, cache_control:{ type:'ephemeral' } }];
       if (thinkingEnabled) body.thinking = model==='claude-opus-4-7' ? { type:'adaptive' } : { type:'enabled', budget_tokens:10000 };
+      const _tools = getHealthTools();
+      if (_tools.length) body.tools = _tools;
       headers = { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true', 'anthropic-beta': 'interleaved-thinking-2025-05-14' };
       url = 'https://api.anthropic.com/v1/messages';
     }
 
-    const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal: abortCtrl.signal });
-    if (!res.ok) { throw new Error('HTTP ' + res.status); }
+    let res;
+    if (useDS || useOAI) {
+      res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal: abortCtrl.signal });
+      if (!res.ok) { throw new Error('HTTP ' + res.status); }
+    }
 
     const asstMsg = { role: 'assistant', content: '', _time: nowTW() };
     msgHistory.push(asstMsg);
@@ -2296,20 +2353,35 @@ async function regenerateAssistantMsg() {
       }
     };
 
-    const { reply: finalReply, thinkingText } = await doStream(res, useDS, useOAI,
-      (chunk) => {
-        _setupThink();
-        if (_thinkContent) _thinkContent.textContent += chunk;
-        const scEl = document.getElementById('messages-msg');
-        if (scEl) scEl.scrollTop = scEl.scrollHeight;
-      },
-      (chunk) => {
-        asstMsg.content += chunk;
-        if (lastRow) renderBt(lastRow, asstMsg.content);
-        const scEl = document.getElementById('messages-msg');
-        if (scEl) scEl.scrollTop = scEl.scrollHeight;
-      }
-    );
+    const { reply: finalReply, thinkingText } = (useDS || useOAI)
+      ? await doStream(res, useDS, useOAI,
+          (chunk) => {
+            _setupThink();
+            if (_thinkContent) _thinkContent.textContent += chunk;
+            const scEl = document.getElementById('messages-msg');
+            if (scEl) scEl.scrollTop = scEl.scrollHeight;
+          },
+          (chunk) => {
+            asstMsg.content += chunk;
+            if (lastRow) renderBt(lastRow, asstMsg.content);
+            const scEl = document.getElementById('messages-msg');
+            if (scEl) scEl.scrollTop = scEl.scrollHeight;
+          }
+        )
+      : await runClaudeWithTools(claudeMessages, body, headers, url, abortCtrl.signal,
+          (chunk) => {
+            _setupThink();
+            if (_thinkContent) _thinkContent.textContent += chunk;
+            const scEl = document.getElementById('messages-msg');
+            if (scEl) scEl.scrollTop = scEl.scrollHeight;
+          },
+          (chunk) => {
+            asstMsg.content += chunk;
+            if (lastRow) renderBt(lastRow, asstMsg.content);
+            const scEl = document.getElementById('messages-msg');
+            if (scEl) scEl.scrollTop = scEl.scrollHeight;
+          }
+        );
     if (_thinkEl) _thinkEl.open = false;
     asstMsg.content = finalReply;
     if (thinkingText) {
@@ -2438,7 +2510,7 @@ async function sendMsg() {
       }
     }
 
-    let body, headers, url, reply = '';
+    let body, headers, url, reply = '', claudeMessages;
 
     if (useDS) {
       body = { model, max_tokens: thinkingEnabled ? 8000 : 2048, stream: true, messages: [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages] };
@@ -2449,14 +2521,21 @@ async function sendMsg() {
       headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
       url = 'https://api.openai.com/v1/chat/completions';
     } else {
-      body = { model, max_tokens: thinkingEnabled ? 16000 : 2048, stream: true, system: sys || undefined, messages: apiMessages };
+      claudeMessages = addHistoryCacheBreakpoint(apiMessages);
+      body = { model, max_tokens: thinkingEnabled ? 16000 : 2048, stream: true };
+      if (sys) body.system = [{ type:'text', text:sys, cache_control:{ type:'ephemeral' } }];
       if (thinkingEnabled) body.thinking = model==='claude-opus-4-7' ? { type:'adaptive' } : { type:'enabled', budget_tokens:10000 };
+      const _tools = getHealthTools();
+      if (_tools.length) body.tools = _tools;
       headers = { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true', 'anthropic-beta': 'interleaved-thinking-2025-05-14' };
       url = 'https://api.anthropic.com/v1/messages';
     }
 
-    const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal: abortCtrl.signal });
-    if (!res.ok) { throw new Error('HTTP ' + res.status); }
+    let res;
+    if (useDS || useOAI) {
+      res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal: abortCtrl.signal });
+      if (!res.ok) { throw new Error('HTTP ' + res.status); }
+    }
 
     // 建立空 assistant 氣泡開始 streaming
     const asstMsg = { role: 'assistant', content: '', _time: nowTW() };
@@ -2484,20 +2563,35 @@ async function sendMsg() {
       }
     };
 
-    const { reply: finalReply, thinkingText } = await doStream(res, useDS, useOAI,
-      (chunk) => {
-        _setupThink();
-        if (_thinkContent) _thinkContent.textContent += chunk;
-        const scEl = document.getElementById('messages-msg');
-        if (scEl) scEl.scrollTop = scEl.scrollHeight;
-      },
-      (chunk) => {
-        asstMsg.content += chunk;
-        if (lastRow) renderBt(lastRow, asstMsg.content);
-        const scEl = document.getElementById('messages-msg');
-        if (scEl) scEl.scrollTop = scEl.scrollHeight;
-      }
-    );
+    const { reply: finalReply, thinkingText } = (useDS || useOAI)
+      ? await doStream(res, useDS, useOAI,
+          (chunk) => {
+            _setupThink();
+            if (_thinkContent) _thinkContent.textContent += chunk;
+            const scEl = document.getElementById('messages-msg');
+            if (scEl) scEl.scrollTop = scEl.scrollHeight;
+          },
+          (chunk) => {
+            asstMsg.content += chunk;
+            if (lastRow) renderBt(lastRow, asstMsg.content);
+            const scEl = document.getElementById('messages-msg');
+            if (scEl) scEl.scrollTop = scEl.scrollHeight;
+          }
+        )
+      : await runClaudeWithTools(claudeMessages, body, headers, url, abortCtrl.signal,
+          (chunk) => {
+            _setupThink();
+            if (_thinkContent) _thinkContent.textContent += chunk;
+            const scEl = document.getElementById('messages-msg');
+            if (scEl) scEl.scrollTop = scEl.scrollHeight;
+          },
+          (chunk) => {
+            asstMsg.content += chunk;
+            if (lastRow) renderBt(lastRow, asstMsg.content);
+            const scEl = document.getElementById('messages-msg');
+            if (scEl) scEl.scrollTop = scEl.scrollHeight;
+          }
+        );
     if (_thinkEl) _thinkEl.open = false;
     asstMsg.content = finalReply;
     // 將思考也存進 msgHistory，方便下次還原
@@ -3243,7 +3337,7 @@ async function send() {
       }
     }
 
-    let body, headers, url;
+    let body, headers, url, claudeMessages;
 
     if (useDS || useOAI) {
       // DeepSeek / OpenAI 用 OpenAI 相容格式
@@ -3268,18 +3362,24 @@ async function send() {
       headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
       url = useDS ? 'https://api.deepseek.com/chat/completions' : 'https://api.openai.com/v1/chat/completions';
     } else {
-      // Claude 用 Anthropic 格式，只對 system prompt 做 Prompt Caching
-      body = { model, max_tokens: thinkingEnabled?16000:2048, messages: apiMessages };
+      // Claude 用 Anthropic 格式：system prompt + 對話歷史都做 Prompt Caching，並提供健康資料工具讓模型自己選擇要不要查
+      claudeMessages = addHistoryCacheBreakpoint(apiMessages);
+      body = { model, max_tokens: thinkingEnabled?16000:2048, stream: true };
       if (sys) body.system = [{ type:'text', text:sys, cache_control:{ type:'ephemeral' } }];
       if (thinkingEnabled) body.thinking = model==='claude-opus-4-7' ? { type:'adaptive' } : { type:'enabled', budget_tokens:10000 };
-      if (searchEnabled) body.tools = [{ type:'web_search_20250305', name:'web_search' }];
-      body.stream = true;
+      const _tools = [...(searchEnabled ? [{ type:'web_search_20250305', name:'web_search' }] : []), ...getHealthTools()];
+      if (_tools.length) body.tools = _tools;
       headers = { 'Content-Type':'application/json', 'x-api-key':key, 'anthropic-version':'2023-06-01', 'anthropic-dangerous-direct-browser-access':'true', 'anthropic-beta':'interleaved-thinking-2025-05-14' };
       url = 'https://api.anthropic.com/v1/messages';
     }
 
-    const res=await fetch(url,{ method:'POST', headers, body:JSON.stringify(body), signal:abortCtrl.signal });
-    if (!res.ok) { const err=await res.json().catch(()=>({})); throw new Error(err?.error?.message||`HTTP ${res.status}`); }
+    let res;
+    if (!(useDS || useOAI)) {
+      // Claude 走獨立的工具呼叫流程，fetch 在 runClaudeWithTools 裡處理
+    } else {
+      res=await fetch(url,{ method:'POST', headers, body:JSON.stringify(body), signal:abortCtrl.signal });
+      if (!res.ok) { const err=await res.json().catch(()=>({})); throw new Error(err?.error?.message||`HTTP ${res.status}`); }
+    }
 
     // 準備 UI（移除 typing 狀態，建立 streaming 用的 <p>）
     tb.querySelector('.bubble').classList.remove('typing');
@@ -3299,10 +3399,15 @@ async function send() {
       }
     };
 
-    const { reply, thinkingText } = await doStream(res, useDS, useOAI,
-      (chunk) => { _setupThink(); _thinkContent.textContent += chunk; scrollBot(); },
-      (chunk) => { _streamP.textContent += chunk; scrollBot(); }
-    );
+    const { reply, thinkingText } = (useDS || useOAI)
+      ? await doStream(res, useDS, useOAI,
+          (chunk) => { _setupThink(); _thinkContent.textContent += chunk; scrollBot(); },
+          (chunk) => { _streamP.textContent += chunk; scrollBot(); }
+        )
+      : await runClaudeWithTools(claudeMessages, body, headers, url, abortCtrl.signal,
+          (chunk) => { _setupThink(); _thinkContent.textContent += chunk; scrollBot(); },
+          (chunk) => { _streamP.textContent += chunk; scrollBot(); }
+        );
 
     if (_thinkEl) _thinkEl.open = false;
     renderBt(_btEl, reply);
@@ -3482,7 +3587,7 @@ async function regenerateFrom(historyIdx) {
       }
     }
 
-    let body, headers, url;
+    let body, headers, url, claudeMessages;
     if (useDS || useOAI) {
       const oaiMessages=apiMessages.map(m=>{
         if (Array.isArray(m.content)) {
@@ -3502,17 +3607,21 @@ async function regenerateFrom(historyIdx) {
       headers={'Content-Type':'application/json','Authorization':`Bearer ${key}`};
       url=useDS?'https://api.deepseek.com/chat/completions':'https://api.openai.com/v1/chat/completions';
     } else {
-      body={model,max_tokens:thinkingEnabled?16000:2048,messages:apiMessages};
+      claudeMessages = addHistoryCacheBreakpoint(apiMessages);
+      body={model,max_tokens:thinkingEnabled?16000:2048,stream:true};
       if (sys) body.system=[{type:'text',text:sys,cache_control:{type:'ephemeral'}}];
       if (thinkingEnabled) body.thinking=model==='claude-opus-4-7'?{type:'adaptive'}:{type:'enabled',budget_tokens:10000};
-      if (searchEnabled) body.tools=[{type:'web_search_20250305',name:'web_search'}];
-      body.stream=true;
+      const _tools=[...(searchEnabled?[{type:'web_search_20250305',name:'web_search'}]:[]),...getHealthTools()];
+      if (_tools.length) body.tools=_tools;
       headers={'Content-Type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true','anthropic-beta':'interleaved-thinking-2025-05-14'};
       url='https://api.anthropic.com/v1/messages';
     }
 
-    const res=await fetch(url,{method:'POST',headers,body:JSON.stringify(body),signal:abortCtrl.signal});
-    if (!res.ok) { const err=await res.json().catch(()=>({})); throw new Error(err?.error?.message||`HTTP ${res.status}`); }
+    let res;
+    if (useDS || useOAI) {
+      res=await fetch(url,{method:'POST',headers,body:JSON.stringify(body),signal:abortCtrl.signal});
+      if (!res.ok) { const err=await res.json().catch(()=>({})); throw new Error(err?.error?.message||`HTTP ${res.status}`); }
+    }
 
     tb.querySelector('.bubble').classList.remove('typing');
     const _btEl = tb.querySelector('.bt');
@@ -3531,10 +3640,15 @@ async function regenerateFrom(historyIdx) {
       }
     };
 
-    const { reply, thinkingText } = await doStream(res, useDS, useOAI,
-      (chunk) => { _setupThink(); _thinkContent.textContent += chunk; scrollBot(); },
-      (chunk) => { _streamP.textContent += chunk; scrollBot(); }
-    );
+    const { reply, thinkingText } = (useDS || useOAI)
+      ? await doStream(res, useDS, useOAI,
+          (chunk) => { _setupThink(); _thinkContent.textContent += chunk; scrollBot(); },
+          (chunk) => { _streamP.textContent += chunk; scrollBot(); }
+        )
+      : await runClaudeWithTools(claudeMessages, body, headers, url, abortCtrl.signal,
+          (chunk) => { _setupThink(); _thinkContent.textContent += chunk; scrollBot(); },
+          (chunk) => { _streamP.textContent += chunk; scrollBot(); }
+        );
 
     if (_thinkEl) _thinkEl.open = false;
     renderBt(_btEl, reply);
@@ -3581,6 +3695,9 @@ async function doStream(res, useDS, useOAI, onThink, onReply) {
   const decoder = new TextDecoder();
   let buf = '', reply = '', thinking = '';
   let claudeBlockType = null;
+  let stopReason = null;
+  let toolCalls = []; // Claude: [{ id, name, inputJson }]
+  let curToolIdx = -1;
 
   while (true) {
     const { done, value } = await reader.read();
@@ -3598,17 +3715,78 @@ async function doStream(res, useDS, useOAI, onThink, onReply) {
           const delta = d.choices?.[0]?.delta;
           if (delta?.reasoning_content) { thinking += delta.reasoning_content; onThink(delta.reasoning_content); }
           if (delta?.content) { reply += delta.content; onReply(delta.content); }
+          if (d.choices?.[0]?.finish_reason) stopReason = d.choices[0].finish_reason;
         } else {
-          if (d.type === 'content_block_start') claudeBlockType = d.content_block?.type;
-          else if (d.type === 'content_block_delta') {
+          if (d.type === 'content_block_start') {
+            claudeBlockType = d.content_block?.type;
+            if (claudeBlockType === 'tool_use') {
+              toolCalls.push({ id: d.content_block.id, name: d.content_block.name, inputJson: '' });
+              curToolIdx = toolCalls.length - 1;
+            }
+          } else if (d.type === 'content_block_delta') {
             if (d.delta?.type === 'thinking_delta') { thinking += d.delta.thinking; onThink(d.delta.thinking); }
             else if (d.delta?.type === 'text_delta') { reply += d.delta.text; onReply(d.delta.text); }
+            else if (d.delta?.type === 'input_json_delta' && curToolIdx >= 0) { toolCalls[curToolIdx].inputJson += d.delta.partial_json || ''; }
+          } else if (d.type === 'message_delta') {
+            if (d.delta?.stop_reason) stopReason = d.delta.stop_reason;
           }
         }
       } catch(e) {}
     }
   }
-  return { reply: reply || '（沒有回應）', thinkingText: thinking || null };
+  const parsedToolCalls = toolCalls.map(tc => {
+    let input = {};
+    try { input = tc.inputJson ? JSON.parse(tc.inputJson) : {}; } catch(e) {}
+    return { id: tc.id, name: tc.name, input };
+  });
+  return { reply: reply || (parsedToolCalls.length ? '' : '（沒有回應）'), thinkingText: thinking || null, stopReason, toolCalls: parsedToolCalls };
+}
+
+// 專門給 Claude 用：處理「模型呼叫工具 → 我們執行 → 把結果丟回去 → 模型接著生成最終回覆」的來回迴圈。
+// body 需已包含 model/max_tokens/system/tools 等固定欄位（不含 messages，messages 由這裡動態管理）。
+async function runClaudeWithTools(initialMessages, body, headers, url, abortSignal, onThink, onReply) {
+  let messages = initialMessages;
+  let finalReply = '', finalThinking = null;
+  for (let round = 0; round < 4; round++) {
+    const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ ...body, messages }), signal: abortSignal });
+    if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err?.error?.message || `HTTP ${res.status}`); }
+    const { reply, thinkingText, stopReason, toolCalls } = await doStream(res, false, false, onThink, onReply);
+    if (stopReason === 'tool_use' && toolCalls && toolCalls.length) {
+      const assistantContent = [];
+      if (reply) assistantContent.push({ type: 'text', text: reply });
+      toolCalls.forEach(tc => assistantContent.push({ type: 'tool_use', id: tc.id, name: tc.name, input: tc.input }));
+      messages = [...messages, { role: 'assistant', content: assistantContent }];
+      const toolResults = toolCalls.map(tc => ({ type: 'tool_result', tool_use_id: tc.id, content: executeHealthTool(tc.name) }));
+      messages = [...messages, { role: 'user', content: toolResults }];
+      continue;
+    }
+    finalReply = reply; finalThinking = thinkingText;
+    break;
+  }
+  return { reply: finalReply, thinkingText: finalThinking };
+}
+
+// 非串流版（給主動訊息用，這兩處本來就是用 res.json() 一次拿完整回覆，不是用 doStream）
+async function runClaudeWithToolsNonStream(initialMessages, body, headers, url) {
+  let messages = initialMessages;
+  for (let round = 0; round < 4; round++) {
+    const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ ...body, messages }) });
+    if (!res.ok) return '';
+    const d = await res.json();
+    const textBlock = d.content?.find(b => b.type === 'text');
+    const toolBlocks = (d.content || []).filter(b => b.type === 'tool_use');
+    if (d.stop_reason === 'tool_use' && toolBlocks.length) {
+      const assistantContent = [];
+      if (textBlock?.text) assistantContent.push({ type: 'text', text: textBlock.text });
+      toolBlocks.forEach(tb => assistantContent.push({ type: 'tool_use', id: tb.id, name: tb.name, input: tb.input }));
+      messages = [...messages, { role: 'assistant', content: assistantContent }];
+      const toolResults = toolBlocks.map(tb => ({ type: 'tool_result', tool_use_id: tb.id, content: executeHealthTool(tb.name) }));
+      messages = [...messages, { role: 'user', content: toolResults }];
+      continue;
+    }
+    return textBlock?.text || '';
+  }
+  return '';
 }
 
 
