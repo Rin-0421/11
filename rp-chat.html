@@ -1633,6 +1633,29 @@ function getHealthTools() {
   ];
 }
 
+// 同一組工具的 OpenAI/DeepSeek（function calling）格式版本
+function getHealthToolsOpenAI() {
+  if (!fitInject) return [];
+  return [
+    {
+      type: 'function',
+      function: {
+        name: 'get_today_health',
+        description: '查詢使用者「今天」的步數與睡眠資料。不包含心跳指數/活動量。',
+        parameters: { type: 'object', properties: {} }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'get_recent_health',
+        description: '查詢使用者「最近 5 天（含今天）」的步數與睡眠趨勢，可用來判斷最近作息、活動量的變化。不包含心跳指數/活動量。',
+        parameters: { type: 'object', properties: {} }
+      }
+    }
+  ];
+}
+
 // 實際執行健康工具查詢，回傳給模型的文字內容
 function executeHealthTool(name) {
   const todayStr = new Date().toISOString().slice(0, 10);
@@ -1812,21 +1835,21 @@ async function generateProactive(conv) {
   try {
     let body, headers, url, reply = '';
     if (useDS) {
-      body = { model, max_tokens: 2000, messages: [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages] };
+      const oaiMessages = [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages];
+      body = { model, max_tokens: 2000 };
+      const _oaiTools = getHealthToolsOpenAI();
+      if (_oaiTools.length) body.tools = _oaiTools;
       headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
       url = 'https://api.deepseek.com/chat/completions';
-      const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
-      if (!res.ok) return false;
-      const d = await res.json();
-      reply = d.choices?.[0]?.message?.content || '';
+      reply = await runOpenAIWithToolsNonStream(oaiMessages, body, headers, url);
     } else if (useOAI) {
-      body = { model, max_tokens: 2000, messages: [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages] };
+      const oaiMessages = [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages];
+      body = { model, max_tokens: 2000 };
+      const _oaiTools = getHealthToolsOpenAI();
+      if (_oaiTools.length) body.tools = _oaiTools;
       headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
       url = 'https://api.openai.com/v1/chat/completions';
-      const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
-      if (!res.ok) return false;
-      const d = await res.json();
-      reply = d.choices?.[0]?.message?.content || '';
+      reply = await runOpenAIWithToolsNonStream(oaiMessages, body, headers, url);
     } else {
       // Claude：明確關閉思考；system + 歷史都做快取，並提供健康工具
       const claudeMessages = addHistoryCacheBreakpoint(apiMessages);
@@ -1896,21 +1919,21 @@ async function generateProactiveMsg() {
   try {
     let body, headers, url, reply = '';
     if (useDS) {
-      body = { model, max_tokens: 2000, messages: [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages] };
+      const oaiMessages = [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages];
+      body = { model, max_tokens: 2000 };
+      const _oaiTools = getHealthToolsOpenAI();
+      if (_oaiTools.length) body.tools = _oaiTools;
       headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
       url = 'https://api.deepseek.com/chat/completions';
-      const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
-      if (!res.ok) return false;
-      const d = await res.json();
-      reply = d.choices?.[0]?.message?.content || '';
+      reply = await runOpenAIWithToolsNonStream(oaiMessages, body, headers, url);
     } else if (useOAI) {
-      body = { model, max_tokens: 2000, messages: [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages] };
+      const oaiMessages = [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages];
+      body = { model, max_tokens: 2000 };
+      const _oaiTools = getHealthToolsOpenAI();
+      if (_oaiTools.length) body.tools = _oaiTools;
       headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
       url = 'https://api.openai.com/v1/chat/completions';
-      const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
-      if (!res.ok) return false;
-      const d = await res.json();
-      reply = d.choices?.[0]?.message?.content || '';
+      reply = await runOpenAIWithToolsNonStream(oaiMessages, body, headers, url);
     } else {
       const claudeMessages = addHistoryCacheBreakpoint(apiMessages);
       body = { model, max_tokens: 2000 };
@@ -2305,13 +2328,19 @@ async function regenerateAssistantMsg() {
       }
     }
 
-    let body, headers, url, claudeMessages;
+    let body, headers, url, claudeMessages, oaiMessages;
     if (useDS) {
-      body = { model, max_tokens: thinkingEnabled ? 8000 : 2048, stream: true, messages: [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages] };
+      oaiMessages = [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages];
+      body = { model, max_tokens: thinkingEnabled ? 8000 : 2048, stream: true };
+      const _oaiTools = getHealthToolsOpenAI();
+      if (_oaiTools.length) body.tools = _oaiTools;
       headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
       url = 'https://api.deepseek.com/chat/completions';
     } else if (useOAI) {
-      body = { model, max_tokens: 2048, stream: true, messages: [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages] };
+      oaiMessages = [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages];
+      body = { model, max_tokens: 2048, stream: true };
+      const _oaiTools = getHealthToolsOpenAI();
+      if (_oaiTools.length) body.tools = _oaiTools;
       headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
       url = 'https://api.openai.com/v1/chat/completions';
     } else {
@@ -2324,12 +2353,6 @@ async function regenerateAssistantMsg() {
       if (_tools.length) body.tools = _tools;
       headers = { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true', 'anthropic-beta': 'interleaved-thinking-2025-05-14' };
       url = 'https://api.anthropic.com/v1/messages';
-    }
-
-    let res;
-    if (useDS || useOAI) {
-      res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal: abortCtrl.signal });
-      if (!res.ok) { throw new Error('HTTP ' + res.status); }
     }
 
     const asstMsg = { role: 'assistant', content: '', _time: nowTW() };
@@ -2354,8 +2377,8 @@ async function regenerateAssistantMsg() {
       }
     };
 
-    const { reply: finalReply, thinkingText } = (useDS || useOAI)
-      ? await doStream(res, useDS, useOAI,
+    let { reply: finalReply, thinkingText } = (useDS || useOAI)
+      ? await runOpenAIWithTools(oaiMessages, body, headers, url, useDS, useOAI, abortCtrl.signal,
           (chunk) => {
             _setupThink();
             if (_thinkContent) _thinkContent.textContent += chunk;
@@ -2383,6 +2406,7 @@ async function regenerateAssistantMsg() {
             if (scEl) scEl.scrollTop = scEl.scrollHeight;
           }
         );
+    finalReply = finalReply || '（沒有回應）';
     if (_thinkEl) _thinkEl.open = false;
     asstMsg.content = finalReply;
     if (thinkingText) {
@@ -2511,14 +2535,20 @@ async function sendMsg() {
       }
     }
 
-    let body, headers, url, reply = '', claudeMessages;
+    let body, headers, url, reply = '', claudeMessages, oaiMessages;
 
     if (useDS) {
-      body = { model, max_tokens: thinkingEnabled ? 8000 : 2048, stream: true, messages: [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages] };
+      oaiMessages = [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages];
+      body = { model, max_tokens: thinkingEnabled ? 8000 : 2048, stream: true };
+      const _oaiTools = getHealthToolsOpenAI();
+      if (_oaiTools.length) body.tools = _oaiTools;
       headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
       url = 'https://api.deepseek.com/chat/completions';
     } else if (useOAI) {
-      body = { model, max_tokens: 2048, stream: true, messages: [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages] };
+      oaiMessages = [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages];
+      body = { model, max_tokens: 2048, stream: true };
+      const _oaiTools = getHealthToolsOpenAI();
+      if (_oaiTools.length) body.tools = _oaiTools;
       headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
       url = 'https://api.openai.com/v1/chat/completions';
     } else {
@@ -2531,12 +2561,6 @@ async function sendMsg() {
       if (_tools.length) body.tools = _tools;
       headers = { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true', 'anthropic-beta': 'interleaved-thinking-2025-05-14' };
       url = 'https://api.anthropic.com/v1/messages';
-    }
-
-    let res;
-    if (useDS || useOAI) {
-      res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal: abortCtrl.signal });
-      if (!res.ok) { throw new Error('HTTP ' + res.status); }
     }
 
     // 建立空 assistant 氣泡開始 streaming
@@ -2565,8 +2589,8 @@ async function sendMsg() {
       }
     };
 
-    const { reply: finalReply, thinkingText } = (useDS || useOAI)
-      ? await doStream(res, useDS, useOAI,
+    let { reply: finalReply, thinkingText } = (useDS || useOAI)
+      ? await runOpenAIWithTools(oaiMessages, body, headers, url, useDS, useOAI, abortCtrl.signal,
           (chunk) => {
             _setupThink();
             if (_thinkContent) _thinkContent.textContent += chunk;
@@ -2594,6 +2618,7 @@ async function sendMsg() {
             if (scEl) scEl.scrollTop = scEl.scrollHeight;
           }
         );
+    finalReply = finalReply || '（沒有回應）';
     if (_thinkEl) _thinkEl.open = false;
     asstMsg.content = finalReply;
     // 將思考也存進 msgHistory，方便下次還原
@@ -3339,11 +3364,11 @@ async function send() {
       }
     }
 
-    let body, headers, url, claudeMessages;
+    let body, headers, url, claudeMessages, oaiMessages;
 
     if (useDS || useOAI) {
       // DeepSeek / OpenAI 用 OpenAI 相容格式
-      const oaiMessages = apiMessages.map(m => {
+      oaiMessages = apiMessages.map(m => {
         const role = m.role;
         if (Array.isArray(m.content)) {
           const parts = [];
@@ -3358,9 +3383,9 @@ async function send() {
         return { role, content: typeof m.content === 'string' ? m.content : '' };
       });
       if (sys) oaiMessages.unshift({ role: 'system', content: sys });
-      body = { model, max_tokens: 2048, messages: oaiMessages };
-      if (useOAI && searchEnabled) body.tools = [{ type: 'web_search_preview' }];
-      body.stream = true;
+      body = { model, max_tokens: 2048, stream: true };
+      const _oaiTools = [...(useOAI && searchEnabled ? [{ type: 'web_search_preview' }] : []), ...getHealthToolsOpenAI()];
+      if (_oaiTools.length) body.tools = _oaiTools;
       headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
       url = useDS ? 'https://api.deepseek.com/chat/completions' : 'https://api.openai.com/v1/chat/completions';
     } else {
@@ -3374,14 +3399,6 @@ async function send() {
       if (_tools.length) body.tools = _tools;
       headers = { 'Content-Type':'application/json', 'x-api-key':key, 'anthropic-version':'2023-06-01', 'anthropic-dangerous-direct-browser-access':'true', 'anthropic-beta':'interleaved-thinking-2025-05-14' };
       url = 'https://api.anthropic.com/v1/messages';
-    }
-
-    let res;
-    if (!(useDS || useOAI)) {
-      // Claude 走獨立的工具呼叫流程，fetch 在 runClaudeWithTools 裡處理
-    } else {
-      res=await fetch(url,{ method:'POST', headers, body:JSON.stringify(body), signal:abortCtrl.signal });
-      if (!res.ok) { const err=await res.json().catch(()=>({})); throw new Error(err?.error?.message||`HTTP ${res.status}`); }
     }
 
     // 準備 UI（移除 typing 狀態，建立 streaming 用的 <p>）
@@ -3402,8 +3419,8 @@ async function send() {
       }
     };
 
-    const { reply, thinkingText } = (useDS || useOAI)
-      ? await doStream(res, useDS, useOAI,
+    let { reply, thinkingText } = (useDS || useOAI)
+      ? await runOpenAIWithTools(oaiMessages, body, headers, url, useDS, useOAI, abortCtrl.signal,
           (chunk) => { _setupThink(); _thinkContent.textContent += chunk; scrollBot(); },
           (chunk) => { _streamP.textContent += chunk; scrollBot(); }
         )
@@ -3411,6 +3428,7 @@ async function send() {
           (chunk) => { _setupThink(); _thinkContent.textContent += chunk; scrollBot(); },
           (chunk) => { _streamP.textContent += chunk; scrollBot(); }
         );
+    reply = reply || '（沒有回應）';
 
     if (_thinkEl) _thinkEl.open = false;
     renderBt(_btEl, reply);
@@ -3590,9 +3608,9 @@ async function regenerateFrom(historyIdx) {
       }
     }
 
-    let body, headers, url, claudeMessages;
+    let body, headers, url, claudeMessages, oaiMessages;
     if (useDS || useOAI) {
-      const oaiMessages=apiMessages.map(m=>{
+      oaiMessages=apiMessages.map(m=>{
         if (Array.isArray(m.content)) {
           const parts=[];
           for (const b of m.content) {
@@ -3604,9 +3622,9 @@ async function regenerateFrom(historyIdx) {
         return {role:m.role,content:typeof m.content==='string'?m.content:''};
       });
       if (sys) oaiMessages.unshift({role:'system',content:sys});
-      body={model,max_tokens:2048,messages:oaiMessages};
-      if (useOAI && searchEnabled) body.tools=[{type:'web_search_preview'}];
-      body.stream=true;
+      body={model,max_tokens:2048,stream:true};
+      const _oaiTools=[...(useOAI && searchEnabled?[{type:'web_search_preview'}]:[]),...getHealthToolsOpenAI()];
+      if (_oaiTools.length) body.tools=_oaiTools;
       headers={'Content-Type':'application/json','Authorization':`Bearer ${key}`};
       url=useDS?'https://api.deepseek.com/chat/completions':'https://api.openai.com/v1/chat/completions';
     } else {
@@ -3619,12 +3637,6 @@ async function regenerateFrom(historyIdx) {
       if (_tools.length) body.tools=_tools;
       headers={'Content-Type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true','anthropic-beta':'interleaved-thinking-2025-05-14'};
       url='https://api.anthropic.com/v1/messages';
-    }
-
-    let res;
-    if (useDS || useOAI) {
-      res=await fetch(url,{method:'POST',headers,body:JSON.stringify(body),signal:abortCtrl.signal});
-      if (!res.ok) { const err=await res.json().catch(()=>({})); throw new Error(err?.error?.message||`HTTP ${res.status}`); }
     }
 
     tb.querySelector('.bubble').classList.remove('typing');
@@ -3644,8 +3656,8 @@ async function regenerateFrom(historyIdx) {
       }
     };
 
-    const { reply, thinkingText } = (useDS || useOAI)
-      ? await doStream(res, useDS, useOAI,
+    let { reply, thinkingText } = (useDS || useOAI)
+      ? await runOpenAIWithTools(oaiMessages, body, headers, url, useDS, useOAI, abortCtrl.signal,
           (chunk) => { _setupThink(); _thinkContent.textContent += chunk; scrollBot(); },
           (chunk) => { _streamP.textContent += chunk; scrollBot(); }
         )
@@ -3653,6 +3665,7 @@ async function regenerateFrom(historyIdx) {
           (chunk) => { _setupThink(); _thinkContent.textContent += chunk; scrollBot(); },
           (chunk) => { _streamP.textContent += chunk; scrollBot(); }
         );
+    reply = reply || '（沒有回應）';
 
     if (_thinkEl) _thinkEl.open = false;
     renderBt(_btEl, reply);
@@ -3719,6 +3732,15 @@ async function doStream(res, useDS, useOAI, onThink, onReply) {
           const delta = d.choices?.[0]?.delta;
           if (delta?.reasoning_content) { thinking += delta.reasoning_content; onThink(delta.reasoning_content); }
           if (delta?.content) { reply += delta.content; onReply(delta.content); }
+          if (Array.isArray(delta?.tool_calls)) {
+            delta.tool_calls.forEach(tc => {
+              const idx = tc.index ?? 0;
+              if (!toolCalls[idx]) toolCalls[idx] = { id: '', name: '', inputJson: '' };
+              if (tc.id) toolCalls[idx].id = tc.id;
+              if (tc.function?.name) toolCalls[idx].name += tc.function.name;
+              if (tc.function?.arguments) toolCalls[idx].inputJson += tc.function.arguments;
+            });
+          }
           if (d.choices?.[0]?.finish_reason) stopReason = d.choices[0].finish_reason;
         } else {
           if (d.type === 'content_block_start') {
@@ -3743,18 +3765,20 @@ async function doStream(res, useDS, useOAI, onThink, onReply) {
     try { input = tc.inputJson ? JSON.parse(tc.inputJson) : {}; } catch(e) {}
     return { id: tc.id, name: tc.name, input };
   });
-  return { reply: reply || (parsedToolCalls.length ? '' : '（沒有回應）'), thinkingText: thinking || null, stopReason, toolCalls: parsedToolCalls };
+  return { reply, thinkingText: thinking || null, stopReason, toolCalls: parsedToolCalls };
 }
 
 // 專門給 Claude 用：處理「模型呼叫工具 → 我們執行 → 把結果丟回去 → 模型接著生成最終回覆」的來回迴圈。
 // body 需已包含 model/max_tokens/system/tools 等固定欄位（不含 messages，messages 由這裡動態管理）。
 async function runClaudeWithTools(initialMessages, body, headers, url, abortSignal, onThink, onReply) {
   let messages = initialMessages;
-  let finalReply = '', finalThinking = null;
+  let accumulatedReply = '', accumulatedThinking = '';
   for (let round = 0; round < 4; round++) {
     const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ ...body, messages }), signal: abortSignal });
     if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err?.error?.message || `HTTP ${res.status}`); }
     const { reply, thinkingText, stopReason, toolCalls } = await doStream(res, false, false, onThink, onReply);
+    if (reply) accumulatedReply += reply;
+    if (thinkingText) accumulatedThinking += (accumulatedThinking ? '\n\n' : '') + thinkingText;
     if (stopReason === 'tool_use' && toolCalls && toolCalls.length) {
       const assistantContent = [];
       if (reply) assistantContent.push({ type: 'text', text: reply });
@@ -3764,21 +3788,22 @@ async function runClaudeWithTools(initialMessages, body, headers, url, abortSign
       messages = [...messages, { role: 'user', content: toolResults }];
       continue;
     }
-    finalReply = reply; finalThinking = thinkingText;
     break;
   }
-  return { reply: finalReply, thinkingText: finalThinking };
+  return { reply: accumulatedReply || '（沒有回應）', thinkingText: accumulatedThinking || null };
 }
 
 // 非串流版（給主動訊息用，這兩處本來就是用 res.json() 一次拿完整回覆，不是用 doStream）
 async function runClaudeWithToolsNonStream(initialMessages, body, headers, url) {
   let messages = initialMessages;
+  let accumulatedReply = '';
   for (let round = 0; round < 4; round++) {
     const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ ...body, messages }) });
-    if (!res.ok) return '';
+    if (!res.ok) return accumulatedReply;
     const d = await res.json();
     const textBlock = d.content?.find(b => b.type === 'text');
     const toolBlocks = (d.content || []).filter(b => b.type === 'tool_use');
+    if (textBlock?.text) accumulatedReply += textBlock.text;
     if (d.stop_reason === 'tool_use' && toolBlocks.length) {
       const assistantContent = [];
       if (textBlock?.text) assistantContent.push({ type: 'text', text: textBlock.text });
@@ -3788,9 +3813,55 @@ async function runClaudeWithToolsNonStream(initialMessages, body, headers, url) 
       messages = [...messages, { role: 'user', content: toolResults }];
       continue;
     }
-    return textBlock?.text || '';
+    break;
   }
-  return '';
+  return accumulatedReply;
+}
+
+// GPT/DeepSeek（function calling，OpenAI 相容格式）版本的工具呼叫迴圈
+async function runOpenAIWithTools(initialMessages, body, headers, url, useDS, useOAI, abortSignal, onThink, onReply) {
+  let messages = initialMessages;
+  let accumulatedReply = '', accumulatedThinking = '';
+  for (let round = 0; round < 4; round++) {
+    const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ ...body, messages }), signal: abortSignal });
+    if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err?.error?.message || `HTTP ${res.status}`); }
+    const { reply, thinkingText, stopReason, toolCalls } = await doStream(res, useDS, useOAI, onThink, onReply);
+    if (reply) accumulatedReply += reply;
+    if (thinkingText) accumulatedThinking += (accumulatedThinking ? '\n\n' : '') + thinkingText;
+    if (stopReason === 'tool_calls' && toolCalls && toolCalls.length) {
+      messages = [...messages, {
+        role: 'assistant',
+        content: reply || null,
+        tool_calls: toolCalls.map(tc => ({ id: tc.id, type: 'function', function: { name: tc.name, arguments: JSON.stringify(tc.input) } }))
+      }];
+      toolCalls.forEach(tc => messages.push({ role: 'tool', tool_call_id: tc.id, content: executeHealthTool(tc.name) }));
+      continue;
+    }
+    break;
+  }
+  return { reply: accumulatedReply || '（沒有回應）', thinkingText: accumulatedThinking || null };
+}
+
+// 非串流版（給主動訊息用）
+async function runOpenAIWithToolsNonStream(initialMessages, body, headers, url) {
+  let messages = initialMessages;
+  let accumulatedReply = '';
+  for (let round = 0; round < 4; round++) {
+    const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ ...body, messages }) });
+    if (!res.ok) return accumulatedReply;
+    const d = await res.json();
+    const msg = d.choices?.[0]?.message;
+    const text = msg?.content || '';
+    const toolCalls = msg?.tool_calls || [];
+    if (text) accumulatedReply += text;
+    if (toolCalls.length) {
+      messages = [...messages, { role: 'assistant', content: text || null, tool_calls: toolCalls }];
+      toolCalls.forEach(tc => messages.push({ role: 'tool', tool_call_id: tc.id, content: executeHealthTool(tc.function?.name) }));
+      continue;
+    }
+    break;
+  }
+  return accumulatedReply;
 }
 
 
