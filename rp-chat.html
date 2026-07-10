@@ -1106,7 +1106,7 @@ async function loadState() {
       currentConvId = s.currentConvId || null;
       globalSavedModel = s.model || 'claude-sonnet-4-6';
     }
-    if (!conversations.length) conversations.push({ id: uid(), name: '對話 1', history: [] });
+    if (!conversations.length) conversations.push({ id: uid(), name: '對話 1', history: [], model: globalSavedModel });
     if (!currentConvId || !conversations.find(c=>c.id===currentConvId))
       currentConvId = conversations[0].id;
     // 用「目前這個對話」自己儲存的 model 還原下拉選單，而不是用全域舊值蓋掉，
@@ -1862,7 +1862,10 @@ function parseTwTime(str) {
 }
 
 async function generateProactive(conv) {
-  const model = conv.model || document.getElementById('chat-model').value;
+  // 注意：這裡的 conv 不一定是「目前正在看」的那個對話窗口（背景巡檢可能輪到其他視窗），
+  // 所以絕對不能用 document.getElementById('chat-model').value 當備援 —— 那只反映當下畫面顯示的對話，
+  // 沒有自己 model 的舊對話／匯入對話，備援值固定給一個安全預設即可。
+  const model = conv.model || 'claude-sonnet-4-6';
   const useDS = isDeepSeek(model);
   const useOAI = isOpenAI(model);
   const key = getKey(model);
@@ -4106,7 +4109,7 @@ function doClaudeImport() {
   // 只保留最後 40 則
   const kept = converted.slice(-40);
 
-  const newConv = { id: uid(), name, history: kept };
+  const newConv = { id: uid(), name, history: kept, model: document.getElementById('chat-model')?.value || 'claude-sonnet-4-6' };
   conversations.push(newConv);
   currentConvId = newConv.id;
   save(); renderConvList(); renderMessages();
@@ -4140,7 +4143,7 @@ function doImport(f) {
       if (Array.isArray(s.history)) {
         // 舊格式：直接單筆匯入為新對話
         if (!confirm(`匯入「${s.convName||'對話'}」為新的對話窗口？`)) return;
-        const conv={id:uid(),name:s.convName||'匯入的對話',history:s.history};
+        const conv={id:uid(),name:s.convName||'匯入的對話',history:s.history,model:document.getElementById('chat-model')?.value||'claude-sonnet-4-6'};
         conversations.push(conv);
         currentConvId=conv.id;
         if (s.charName && !charName) charName=s.charName;
@@ -4204,7 +4207,7 @@ document.getElementById('import-confirm').addEventListener('click', () => {
         name: cv.name || '匯入的對話',
         history: cv.history || [],
         archive: cv.archive || [],
-        model: cv.model
+        model: cv.model || 'claude-sonnet-4-6'
       });
       importedCount++;
     } else if (it.type === 'msg-current') {
@@ -4213,7 +4216,8 @@ document.getElementById('import-confirm').addEventListener('click', () => {
         id: uid(),
         name: '匯入的聊天',
         history: it.data,
-        archive: []
+        archive: [],
+        model: 'claude-sonnet-4-6'
       });
       importedCount++;
     } else if (it.type === 'msg-archive') {
@@ -4223,7 +4227,8 @@ document.getElementById('import-confirm').addEventListener('click', () => {
         id: uid(),
         name: `匯入的聊天（${a.startTime}）`,
         history: a.history || [],
-        archive: []
+        archive: [],
+        model: 'claude-sonnet-4-6'
       });
       importedCount++;
     }

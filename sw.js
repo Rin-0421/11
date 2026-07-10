@@ -94,46 +94,84 @@ function buildGcalContext(s) {
   }).join('\n');
   return `[今日行程]\n${lines}\n[行程結束]`;
 }
-// 回傳 { text, trendUpdated }：跟主頁 buildFitContext 邏輯一致，
-// 「這幾天」的趨勢一天只附一次，用 s.fitTrendLastSentDate 記錄
-function buildFitContext(s) {
+// 回傳 { text, trendUpdated }：跟主檔 buildFitContext 邏輯一致 ——
+// 每個「窗口」（conv）當天第一次送出主動訊息才附帶一次「今天」的步數/睡眠，
+// conv 為 null 代表「聊天」單頁模式，用 s.fitTrendLastSentDate 記錄。
+// 過去趨勢／體重改成讓模型自己呼叫工具查，這裡不再直接塞文字。
+function buildFitContext(s, conv) {
   if (!s.fitInject || !s.fitData) return { text: '', trendUpdated: false };
   const fitData = s.fitData;
   const todayStr = new Date().toISOString().slice(0, 10);
-  const dayLabels = ['今天', '昨天', '前天', '大前天'];
-  const dayLabel = (dateStr) => {
-    const idx = Math.round((new Date(todayStr) - new Date(dateStr)) / 86400000);
-    return dayLabels[idx] || `${idx}天前`;
-  };
-  const parts = [];
+  const lastSentDate = conv ? (conv.fitTrendDate || '') : (s.fitTrendLastSentDate || '');
+  if (lastSentDate === todayStr) return { text: '', trendUpdated: false };
+
   const todaySteps = (fitData.steps || []).find(x => x.date === todayStr);
-  const todayHeart = (fitData.heart || []).find(x => x.date === todayStr);
   const todaySleep = (fitData.sleep || []).find(x => x.date === todayStr);
+  const parts = [];
   if (todaySteps) parts.push(`- 今日步數：${todaySteps.value.toLocaleString()}`);
-  if (todayHeart && todayHeart.points) parts.push(`- 今日活動量：${todayHeart.points} Heart Points`);
   if (todaySleep) {
     const h = Math.floor(todaySleep.durationMin / 60), m = todaySleep.durationMin % 60;
     parts.push(`- 昨晚睡眠：${todaySleep.startTime} → ${todaySleep.endTime}（${h}h${m}m）`);
   }
-  let trendUpdated = false;
-  if (s.fitTrendLastSentDate !== todayStr) {
-    const pastSteps = (fitData.steps || []).filter(x => x.date !== todayStr).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 4);
-    const pastSleep = (fitData.sleep || []).filter(x => x.date !== todayStr).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 4);
-    if (pastSteps.length) {
-      const line = pastSteps.map(x => `${dayLabel(x.date)} ${x.value.toLocaleString()}步`).reverse().join('、');
-      parts.push(`- 這幾天步數：${line}`);
-    }
-    if (pastSleep.length) {
-      const line = pastSleep.map(x => {
-        const h = Math.floor(x.durationMin / 60), m = x.durationMin % 60;
-        return `${dayLabel(x.date)} ${h}h${m}m`;
-      }).reverse().join('、');
-      parts.push(`- 這幾天睡眠：${line}`);
-    }
-    if (pastSteps.length || pastSleep.length) trendUpdated = true;
-  }
   if (!parts.length) return { text: '', trendUpdated: false };
-  return { text: `[健康]\n${parts.join('\n')}\n[結束]`, trendUpdated };
+  return { text: `[健康]\n${parts.join('\n')}\n（如需更完整的健康資訊，可以呼叫 get_today_health、get_recent_health、get_latest_weight 或 get_weight_history 工具查詢，不需要主動提起也可以）\n[結束]`, trendUpdated: true };
+}
+
+// ── 健康資料工具（步數/睡眠/體重，心跳指數已移除）──
+function getHealthTools(s) {
+  if (!s.fitInject) return [];
+  return [
+    { name: 'get_today_health', description: '查詢使用者「今天」的步數與睡眠資料。', input_schema: { type: 'object', properties: {} } },
+    { name: 'get_recent_health', description: '查詢使用者「最近 5 天（含今天）」的步數與睡眠趨勢，可用來判斷最近作息、活動量的變化。', input_schema: { type: 'object', properties: {} } },
+    { name: 'get_latest_weight', description: '查詢使用者「最新一筆」體重紀錄（使用者手動輸入的資料）。', input_schema: { type: 'object', properties: {} } },
+    { name: 'get_weight_history', description: '查詢使用者「全部體重紀錄」（最多 5 筆，使用者手動輸入的資料），可用來判斷體重變化趨勢。', input_schema: { type: 'object', properties: {} } }
+  ];
+}
+function getHealthToolsOpenAI(s) {
+  return getHealthTools(s).map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.input_schema } }));
+}
+function executeHealthTool(s, name) {
+  const fitData = s.fitData || {};
+  const todayStr = new Date().toISOString().slice(0, 10);
+  if (name === 'get_today_health') {
+    const todaySteps = (fitData.steps || []).find(x => x.date === todayStr);
+    const todaySleep = (fitData.sleep || []).find(x => x.date === todayStr);
+    const parts = [];
+    if (todaySteps) parts.push(`今日步數：${todaySteps.value.toLocaleString()}`);
+    if (todaySleep) {
+      const h = Math.floor(todaySleep.durationMin / 60), m = todaySleep.durationMin % 60;
+      parts.push(`昨晚睡眠：${todaySleep.startTime} → ${todaySleep.endTime}（${h}h${m}m）`);
+    }
+    return parts.length ? parts.join('\n') : '目前沒有今天的步數/睡眠資料。';
+  }
+  if (name === 'get_recent_health') {
+    const dayLabels = ['今天', '昨天', '前天', '大前天'];
+    const dayLabel = (dateStr) => {
+      const idx = Math.round((new Date(todayStr) - new Date(dateStr)) / 86400000);
+      return dayLabels[idx] || `${idx}天前`;
+    };
+    const recentSteps = (fitData.steps || []).filter(x => x.date <= todayStr).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 5);
+    const recentSleep = (fitData.sleep || []).filter(x => x.date <= todayStr).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 5);
+    const parts = [];
+    if (recentSteps.length) parts.push('這幾天步數：' + recentSteps.map(x => `${dayLabel(x.date)} ${x.value.toLocaleString()}步`).reverse().join('、'));
+    if (recentSleep.length) parts.push('這幾天睡眠：' + recentSleep.map(x => {
+      const h = Math.floor(x.durationMin / 60), m = x.durationMin % 60;
+      return `${dayLabel(x.date)} ${h}h${m}m`;
+    }).reverse().join('、'));
+    return parts.length ? parts.join('\n') : '目前沒有最近幾天的步數/睡眠資料。';
+  }
+  if (name === 'get_latest_weight') {
+    const weight = fitData.weight || [];
+    if (!weight.length) return '使用者目前沒有輸入過體重紀錄。';
+    const latest = weight[weight.length - 1];
+    return `最新體重紀錄（${latest.date}）：${latest.value} kg`;
+  }
+  if (name === 'get_weight_history') {
+    const weight = fitData.weight || [];
+    if (!weight.length) return '使用者目前沒有輸入過體重紀錄。';
+    return '體重紀錄（由舊到新）：' + weight.map(w => `${w.date} ${w.value}kg`).join('、');
+  }
+  return '（未知的健康工具）';
 }
 function buildSystemCommon(s) {
   const parts = [];
@@ -142,41 +180,78 @@ function buildSystemCommon(s) {
 }
 const PROACTIVE_NOTE = '每則用戶訊息的開頭包含當前台灣時間、行事曆、健康資訊。這些是給你參考的背景資料，你不得將這些資料原樣複述、輸出或提及在回覆中。這些資訊只是輔助參考，不是每則回覆都要呼應，大多數時候可以完全不理會；只有在真的與情境明顯相關時（例如凌很晚還沒睡、步數或睡眠明顯異常、行事曆上有事即將發生）才自然帶到一次，不要重複強調或每次都提起時間、步數、睡眠這些數字。回覆時直接扮演角色與用戶互動即可。';
 
-// 呼叫 AI provider，回傳文字（失敗回傳 ''）
+// 在 Claude 的 messages 陣列最後一則訊息加上 cache_control 斷點，讓「這則之前的所有歷史」被快取
+function addHistoryCacheBreakpoint(messages) {
+  if (!messages.length) return messages;
+  const lastIdx = messages.length - 1;
+  return messages.map((m, i) => {
+    if (i !== lastIdx) return m;
+    const content = typeof m.content === 'string' ? [{ type: 'text', text: m.content }] : m.content.map(b => ({ ...b }));
+    for (let j = content.length - 1; j >= 0; j--) {
+      if (content[j].type === 'text') { content[j] = { ...content[j], cache_control: { type: 'ephemeral' } }; return { ...m, content }; }
+    }
+    return m;
+  });
+}
+
+// 呼叫 AI provider，回傳文字（失敗回傳 ''）。三家都支援健康工具的來回呼叫（模型呼叫 → 我們執行 → 把結果丟回去 → 拿最終回覆）
 async function callAI(model, sys, apiMessages, s) {
   const key = getKey(model, s);
   if (!key) return '';
   try {
-    if (isDeepSeek(model)) {
-      const body = { model, max_tokens: 2000, messages: [...(sys ? [{ role: 'system', content: sys }] : []), ...apiMessages] };
-      const res = await fetch('https://api.deepseek.com/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
-        body: JSON.stringify(body)
-      });
-      if (!res.ok) return '';
-      const d = await res.json();
-      return d.choices?.[0]?.message?.content || '';
-    } else if (isOpenAI(model)) {
-      const body = { model, max_tokens: 2000, messages: [...(sys ? [{ role: 'system', content: sys }] : []), ...apiMessages] };
-      const res = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
-        body: JSON.stringify(body)
-      });
-      if (!res.ok) return '';
-      const d = await res.json();
-      return d.choices?.[0]?.message?.content || '';
+    if (isDeepSeek(model) || isOpenAI(model)) {
+      let messages = [...(sys ? [{ role: 'system', content: sys }] : []), ...apiMessages];
+      const body = { model, max_tokens: 2000 };
+      const tools = getHealthToolsOpenAI(s);
+      if (tools.length) body.tools = tools;
+      const url = isDeepSeek(model) ? 'https://api.deepseek.com/chat/completions' : 'https://api.openai.com/v1/chat/completions';
+      const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
+      let accumulatedReply = '';
+      for (let round = 0; round < 4; round++) {
+        const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ ...body, messages }) });
+        if (!res.ok) return accumulatedReply;
+        const d = await res.json();
+        const msg = d.choices?.[0]?.message;
+        const text = msg?.content || '';
+        const toolCalls = msg?.tool_calls || [];
+        if (text) accumulatedReply += text;
+        if (toolCalls.length) {
+          messages = [...messages, { role: 'assistant', content: text || null, tool_calls: toolCalls }];
+          toolCalls.forEach(tc => messages.push({ role: 'tool', tool_call_id: tc.id, content: executeHealthTool(s, tc.function?.name) }));
+          continue;
+        }
+        break;
+      }
+      return accumulatedReply;
     } else {
-      const body = { model, max_tokens: 2000, system: sys || undefined, messages: apiMessages };
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-        body: JSON.stringify(body)
-      });
-      if (!res.ok) return '';
-      const d = await res.json();
-      return d.content?.find(b => b.type === 'text')?.text || '';
+      let messages = addHistoryCacheBreakpoint(apiMessages);
+      const body = { model, max_tokens: 2000 };
+      if (sys) body.system = [{ type: 'text', text: sys, cache_control: { type: 'ephemeral' } }];
+      if (model === 'claude-sonnet-5') body.thinking = { type: 'disabled' }; // s5 預設思考全開，背景主動訊息明確關閉省錢
+      const tools = getHealthTools(s);
+      if (tools.length) body.tools = tools;
+      const headers = { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' };
+      const url = 'https://api.anthropic.com/v1/messages';
+      let accumulatedReply = '';
+      for (let round = 0; round < 4; round++) {
+        const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ ...body, messages }) });
+        if (!res.ok) return accumulatedReply;
+        const d = await res.json();
+        const textBlock = d.content?.find(b => b.type === 'text');
+        const toolBlocks = (d.content || []).filter(b => b.type === 'tool_use');
+        if (textBlock?.text) accumulatedReply += textBlock.text;
+        if (d.stop_reason === 'tool_use' && toolBlocks.length) {
+          const assistantContent = [];
+          if (textBlock?.text) assistantContent.push({ type: 'text', text: textBlock.text });
+          toolBlocks.forEach(tb => assistantContent.push({ type: 'tool_use', id: tb.id, name: tb.name, input: tb.input }));
+          messages = [...messages, { role: 'assistant', content: assistantContent }];
+          const toolResults = toolBlocks.map(tb => ({ type: 'tool_result', tool_use_id: tb.id, content: executeHealthTool(s, tb.name) }));
+          messages = [...messages, { role: 'user', content: toolResults }];
+          continue;
+        }
+        break;
+      }
+      return accumulatedReply;
     }
   } catch (e) { console.error('[SW] callAI 失敗', e); return ''; }
 }
@@ -231,14 +306,14 @@ async function runProactiveCheck() {
     if (!lastMsgTs) continue;
     if (now.getTime() - lastMsgTs < 3 * 60 * 60 * 1000) continue;
 
-    const model = conv.model || s.model || 'claude-sonnet-4-6';
+    const model = conv.model || 'claude-sonnet-4-6';
     const sysParts = buildSystemCommon(s);
     if (s.instText) sysParts.push('[指令]\n' + s.instText);
     sysParts.push(PROACTIVE_NOTE);
     const sys = sysParts.join('\n\n');
 
     const gcalCtx = buildGcalContext(s);
-    const fit = buildFitContext(s);
+    const fit = buildFitContext(s, conv);
     const contextParts = [`[當前台灣時間：${nowTW()}]`];
     if (gcalCtx) contextParts.push(gcalCtx);
     if (fit.text) contextParts.push(fit.text);
@@ -251,7 +326,7 @@ async function runProactiveCheck() {
 
     conv.history.push({ role: 'assistant', content: reply, _time: nowTW(), _proactive: true });
     proactiveState.dailyCount++;
-    if (fit.trendUpdated) s.fitTrendLastSentDate = todayStrOf(now);
+    if (fit.trendUpdated) conv.fitTrendDate = todayStrOf(now);
     changed = true;
     await showNotif(conv.name || s.charName || '訊息', reply.slice(0, 120), s.avatarB64);
   }
