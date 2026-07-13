@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
 <title>Chat</title>
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -229,6 +229,7 @@ details[open] .fit-summary::before { transform: rotate(90deg); }
   padding: 14px 16px 12px; border-bottom: 1px solid var(--border);
   font-size: 16px; font-weight: 600; color: var(--text); flex-shrink: 0;
   background: var(--surface);
+  padding-top: max(24px, calc(14px + env(safe-area-inset-top, 20px)));
 }
 .page-body { flex: 1; overflow-y: auto; padding: 16px; }
 
@@ -319,6 +320,9 @@ details[open] .fit-summary::before { transform: rotate(90deg); }
   display: flex; align-items: center; gap: 7px;
   padding: 8px 12px; background: var(--surface);
   border-bottom: 1px solid var(--border); flex-shrink: 0;
+  /* 避開手機狀態列（時間、電量那排）：優先用系統回報的安全區域高度，
+     沒有回報（一般瀏覽器/舊裝置）就退回一個固定值，兩種情況都會讓內容整排往下移。 */
+  padding-top: max(20px, env(safe-area-inset-top, 20px));
 }
 .hdr-av {
   width: 28px; height: 28px; border-radius: 50%;
