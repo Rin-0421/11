@@ -718,15 +718,19 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
     <div class="card" style="max-width:none">
       <div class="card-title">主動訊息</div>
       <div style="font-size:11px;color:var(--text-dim);margin-bottom:10px;line-height:1.5">
-        09:00~21:00 之間，距離上次互動超過 3 小時時，角色會主動傳訊息。主頁和聊天頁共用每日上限，一天最多 3 次。上次未回覆時暫停，直到你回覆才重新計時。
+        09:00~21:00 之間，距離上次互動超過設定的時間時，角色會主動傳訊息。主頁和聊天頁共用每日上限，一天最多 3 次。上次未回覆時暫停，直到你回覆才重新計時。
       </div>
+      <label style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);margin-bottom:8px">
+        <span style="font-size:13px;font-weight:600">間隔多久觸發（小時）</span>
+        <input type="number" id="pg-proactive-hours" min="0.5" max="24" step="0.5" style="width:64px;text-align:center;padding:4px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:inherit">
+      </label>
       <div style="font-size:11px;margin-bottom:8px;padding:8px;border-radius:8px;background:var(--surface2)">
         通知權限狀態：<span id="notif-perm-status" style="font-weight:600">檢查中…</span>
         <button class="btn-sm" id="notif-test-btn" style="margin-left:6px;padding:2px 8px;font-size:11px">測試通知</button>
       </div>
       <div style="font-size:11px;margin-bottom:8px;padding:8px;border-radius:8px;background:var(--surface2);line-height:1.5">
         背景喚醒狀態：<span id="bgsync-status" style="font-weight:600">檢查中…</span><br>
-        <span style="color:var(--text-dim)">（app 沒開時能不能自己醒來傳訊息，實際間隔由 Chrome 決定，不保證準時）</span>
+        <span style="color:var(--text-dim)">（app 沒開時能不能自己醒來傳訊息，實際間隔由系統決定，不保證準時）</span>
       </div>
       <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:6px 0;border-bottom:1px solid var(--border);margin-bottom:8px">
         <span style="font-size:13px;font-weight:600">📩 聊天頁（訊息模式）</span>
@@ -1003,7 +1007,7 @@ let gcalClientId = '', gcalToken = null, gcalTokenExpiry = 0, gcalInject = false
 let fitInject = false, fitData = { steps: [], sleep: [], weight: [] }, fitSnapshotTime = 0, fitTrendLastSentDate = '';
 let proactiveConvIds = [], proactiveState = { lastCheckDate: '', dailyCounts: {} }, proactiveTimer = null;
 let notifications = [], notifEnabled = false, notifLeadMin = 10, notifCheckTimer = null, notifiedIds = new Set();
-let instTextMsg = '', msgHistory = [], msgArchives = [], msgPendingFiles = [], proactiveMsgEnabled = false, msgModel = 'claude-sonnet-4-6';
+let instTextMsg = '', msgHistory = [], msgArchives = [], msgPendingFiles = [], proactiveMsgEnabled = false, msgModel = 'claude-sonnet-4-6', proactiveHours = 3;
 const NOTIF_VIEW_ID = '__notifications__';
 
 const COMPRESS_THRESHOLD = 50;
@@ -1100,6 +1104,7 @@ async function loadState() {
       msgHistory = Array.isArray(s.msgHistory) ? s.msgHistory : [];
       msgArchives = Array.isArray(s.msgArchives) ? s.msgArchives : [];
       proactiveMsgEnabled = !!s.proactiveMsgEnabled;
+      proactiveHours = (typeof s.proactiveHours === 'number' && s.proactiveHours > 0) ? s.proactiveHours : 3;
       msgModel = s.msgModel || 'claude-sonnet-4-6';
       applyDarkMode();
       conversations = s.conversations || [];
@@ -1124,6 +1129,7 @@ async function loadState() {
     renderMessages();
     if (notifEnabled) startNotifTimer();
     startProactiveTimer();
+    await syncPendingProactiveFromNative();
   } catch(e) { console.error('load failed', e); }
 }
 loadState();
@@ -1131,18 +1137,46 @@ loadState();
 // ── Save ──
 async function save() {
   try {
-    const msgModelSel = document.getElementById('msg-model-select');
-    if (msgModelSel) msgModel = msgModelSel.value;
-    await idbSet(SK, {
+    // 注意：msgModel 只能透過 msg-model-select 的 change 事件或 loadState() 更新，
+    // 這裡絕對不能再盲目重讀 DOM 現在的值 —— 否則如果 save() 是因為其他原因被呼叫
+    // （例如背景主動訊息、切換思考/搜尋開關等），而 select 當下顯示的還是尚未同步的
+    // 預設值，就會把錯誤的 claude-sonnet-4-6 寫回存檔，蓋掉使用者真正選的模型。
+    const stateForSave = {
       apiKey, dsKey, oaiKey, charName, avatarB64, docs, instText, thinkingEnabled, searchEnabled,
       darkMode, gcalClientId, gcalInject, gcalEvents, gcalSnapshotTime,
       fitInject, fitData, fitSnapshotTime, fitTrendLastSentDate, proactiveConvIds, proactiveState,
       notifications, notifEnabled, notifLeadMin, notifiedIds: Array.from(notifiedIds),
-      instTextMsg, msgHistory, msgArchives, proactiveMsgEnabled, msgModel,
+      instTextMsg, msgHistory, msgArchives, proactiveMsgEnabled, msgModel, proactiveHours,
       conversations, currentConvId,
       model: document.getElementById('chat-model').value
-    });
+    };
+    await idbSet(SK, stateForSave);
+    // 如果是被包在原生殼（Android WebView）裡跑，順便把狀態同步一份給原生端，
+    // 讓背景的 WorkManager 主動訊息檢查能讀到（它讀不到這裡的 IndexedDB）。
+    if (window.AndroidBridge && window.AndroidBridge.syncState) {
+      try { window.AndroidBridge.syncState(JSON.stringify(stateForSave)); } catch(e) { console.error('原生狀態同步失敗', e); }
+    }
   } catch(e){ console.error('save failed', e); alert('儲存失敗'); }
+}
+
+// 從原生殼接手「背景已經產生、但畫面上還沒有」的主動訊息，接進真正的對話紀錄裡。
+// 只在有 AndroidBridge（也就是真的跑在原生殼裡）時才有作用，一般瀏覽器/PWA 開啟時完全不受影響。
+async function syncPendingProactiveFromNative() {
+  if (!(window.AndroidBridge && window.AndroidBridge.getAndClearPendingProactive)) return;
+  let pending;
+  try { pending = JSON.parse(window.AndroidBridge.getAndClearPendingProactive() || '[]'); } catch(e) { return; }
+  if (!Array.isArray(pending) || !pending.length) return;
+  let changed = false;
+  pending.forEach(item => {
+    if (item.scope === 'conv' && item.convId && item.msg) {
+      const conv = conversations.find(c => c.id === item.convId);
+      if (conv) { conv.history.push(item.msg); changed = true; }
+    } else if (item.scope === 'chat' && item.msg) {
+      msgHistory.push(item.msg);
+      changed = true;
+    }
+  });
+  if (changed) { save(); renderConvList(); renderMessages(); if (typeof renderMsgPage === 'function') renderMsgPage(); }
 }
 
 // ── Avatar ──
@@ -1822,7 +1856,7 @@ async function checkProactive() {
     const lastMsgTs = parseTwTime(lastMsg._time);
     if (!lastMsgTs) continue;
     const diffMs = now.getTime() - lastMsgTs;
-    if (diffMs < 3 * 60 * 60 * 1000) continue;
+    if (diffMs < proactiveHours * 60 * 60 * 1000) continue;
     // 觸發
     const ok = await generateProactive(conv);
     if (ok) proactiveState.dailyCount++;
@@ -1846,7 +1880,7 @@ async function checkProactive() {
       lastTs = proactiveState.messagesEndTime;
     }
     if (!lastTs) return;
-    if (now.getTime() - lastTs < 3 * 60 * 60 * 1000) return;
+    if (now.getTime() - lastTs < proactiveHours * 60 * 60 * 1000) return;
     // 觸發（傳 null 代表對話頁）
     const ok = await generateProactiveMsg();
     if (ok) proactiveState.dailyCount++;
@@ -1934,13 +1968,10 @@ async function generateProactive(conv) {
 
 
 async function generateProactiveMsg() {
-  // 直接從 select 讀取當前值（防止 msgModel 未同步，跟手動傳送保持一致）
-  const sel = document.getElementById('msg-model-select');
-  if (sel) msgModel = sel.value;
-  const model = msgModel;
-  const useDS = isDeepSeek(model);
-  const useOAI = isOpenAI(model);
-  const key = getKey(model);
+  // 通知／主動訊息一律固定用 DeepSeek V4 Pro 發送，不受聊天頁目前選的模型（msgModel）影響，
+  // 避免手動聊天模型被切來切去時，連帶影響到背景通知該用哪個模型的判斷。
+  const model = 'deepseek-v4-pro';
+  const key = dsKey;
   if (!key) return false;
   // 用對話模式的 system prompt
   const sysParts = [];
@@ -1973,34 +2004,13 @@ async function generateProactiveMsg() {
   apiMessages.push({ role: 'user', content: userPrompt });
 
   try {
-    let body, headers, url, reply = '';
-    if (useDS) {
-      const oaiMessages = [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages];
-      body = { model, max_tokens: 2000 };
-      const _oaiTools = getHealthToolsOpenAI();
-      if (_oaiTools.length) body.tools = _oaiTools;
-      headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
-      url = 'https://api.deepseek.com/chat/completions';
-      reply = await runOpenAIWithToolsNonStream(oaiMessages, body, headers, url);
-    } else if (useOAI) {
-      const oaiMessages = [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages];
-      body = { model, max_tokens: 2000 };
-      const _oaiTools = getHealthToolsOpenAI();
-      if (_oaiTools.length) body.tools = _oaiTools;
-      headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
-      url = 'https://api.openai.com/v1/chat/completions';
-      reply = await runOpenAIWithToolsNonStream(oaiMessages, body, headers, url);
-    } else {
-      const claudeMessages = addHistoryCacheBreakpoint(apiMessages);
-      body = { model, max_tokens: 2000 };
-      if (model === 'claude-sonnet-5') body.thinking = { type:'disabled' }; // s5 預設思考全開，主動訊息這種背景任務明確關閉省錢
-      if (sys) body.system = [{ type:'text', text:sys, cache_control:{ type:'ephemeral' } }];
-      const _tools = getHealthTools();
-      if (_tools.length) body.tools = _tools;
-      headers = { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' };
-      url = 'https://api.anthropic.com/v1/messages';
-      reply = await runClaudeWithToolsNonStream(claudeMessages, body, headers, url);
-    }
+    const oaiMessages = [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages];
+    const body = { model, max_tokens: 2000 };
+    const _oaiTools = getHealthToolsOpenAI();
+    if (_oaiTools.length) body.tools = _oaiTools;
+    const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
+    const url = 'https://api.deepseek.com/chat/completions';
+    const reply = await runOpenAIWithToolsNonStream(oaiMessages, body, headers, url);
     if (!reply) return false;
     const time = nowTW();
     msgHistory.push({ role: 'assistant', content: reply, _time: time, _proactive: true });
@@ -2901,6 +2911,7 @@ function fillSettingsPage() {
   document.getElementById('pg-fit-inject').checked = fitInject;
   // 對話頁主動訊息綁定會在下面
 document.getElementById('pg-proactive-msg').checked = proactiveMsgEnabled;
+  document.getElementById('pg-proactive-hours').value = proactiveHours;
   renderProactiveList();
   document.getElementById('pg-claude-key').value = apiKey || '';
   document.getElementById('pg-ds-key').value = dsKey || '';
@@ -2950,6 +2961,12 @@ document.getElementById('pg-proactive-msg').addEventListener('change', e=>{
   proactiveMsgEnabled = e.target.checked;
   save();
   if (proactiveMsgEnabled) { requestNotifPermission(); registerBgSync(); }
+});
+document.getElementById('pg-proactive-hours').addEventListener('change', e=>{
+  const v = parseFloat(e.target.value);
+  proactiveHours = (!isNaN(v) && v > 0) ? v : 3;
+  e.target.value = proactiveHours;
+  save();
 });
 updateNotifPermStatus();
 registerBgSync();

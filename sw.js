@@ -292,6 +292,10 @@ async function runProactiveCheck() {
   let changed = false;
   const conversations = s.conversations || [];
   const proactiveConvIds = s.proactiveConvIds || [];
+  // 收集這次背景檢查實際產生的新內容，最後統一 merge 到「寫回當下」最新的資料上，
+  // 而不是直接改這份可能已經過期的 s 快照。
+  const convAppends = []; // { convId, msg, fitTrendDate }
+  const proactiveHours = (typeof s.proactiveHours === 'number' && s.proactiveHours > 0) ? s.proactiveHours : 3;
 
   // ── 主頁對話檢查 ──
   for (const convId of proactiveConvIds) {
@@ -304,7 +308,7 @@ async function runProactiveCheck() {
     if (!lastMsg || !lastMsg._time) continue;
     const lastMsgTs = parseTwTime(lastMsg._time);
     if (!lastMsgTs) continue;
-    if (now.getTime() - lastMsgTs < 3 * 60 * 60 * 1000) continue;
+    if (now.getTime() - lastMsgTs < proactiveHours * 60 * 60 * 1000) continue;
 
     const model = conv.model || 'claude-sonnet-4-6';
     const sysParts = buildSystemCommon(s);
@@ -317,21 +321,22 @@ async function runProactiveCheck() {
     const contextParts = [`[當前台灣時間：${nowTW()}]`];
     if (gcalCtx) contextParts.push(gcalCtx);
     if (fit.text) contextParts.push(fit.text);
-    const userPrompt = `${contextParts.join('\n')}\n\n距離用戶上次互動已經超過 3 小時，請以角色身份主動傳一則簡短的訊息給用戶（建議簡短一點，關心、閒聊或分享皆可）。請以上面提供的時間、行程、健康資料為準，不要編造。`;
+    const userPrompt = `${contextParts.join('\n')}\n\n距離用戶上次互動已經超過設定的時間，請以角色身份主動傳一則簡短的訊息給用戶（建議簡短一點，關心、閒聊或分享皆可）。請以上面提供的時間、行程、健康資料為準，不要編造。`;
 
     const apiMessages = toApiMessages(conv.history);
     apiMessages.push({ role: 'user', content: userPrompt });
     const reply = await callAI(model, sys, apiMessages, s);
     if (!reply) continue;
 
-    conv.history.push({ role: 'assistant', content: reply, _time: nowTW(), _proactive: true });
+    const msg = { role: 'assistant', content: reply, _time: nowTW(), _proactive: true };
+    convAppends.push({ convId, msg, fitTrendDate: fit.trendUpdated ? todayStrOf(now) : null });
     proactiveState.dailyCount++;
-    if (fit.trendUpdated) conv.fitTrendDate = todayStrOf(now);
     changed = true;
     await showNotif(conv.name || s.charName || '訊息', reply.slice(0, 120), s.avatarB64);
   }
 
   // ── 對話頁檢查 ──
+  let msgAppend = null, msgFitTrendDate = null;
   if (proactiveState.dailyCount < 3 && s.proactiveMsgEnabled) {
     const msgHistory = s.msgHistory || [];
     const last = msgHistory[msgHistory.length - 1];
@@ -344,10 +349,12 @@ async function runProactiveCheck() {
       } else {
         lastTs = proactiveState.messagesEndTime;
       }
-      if (!lastTs || now.getTime() - lastTs < 3 * 60 * 60 * 1000) ok2run = false;
+      if (!lastTs || now.getTime() - lastTs < proactiveHours * 60 * 60 * 1000) ok2run = false;
     }
     if (ok2run) {
-      const model = s.msgModel || 'claude-sonnet-4-6';
+      // 通知／主動訊息一律固定用 DeepSeek V4 Pro，不使用 s.msgModel
+      // （msgModel 是前景聊天頁「手動傳訊息」用的模型選擇，背景通知不應該受它影響或被它的舊快照值干擾）
+      const model = 'deepseek-v4-pro';
       const sysParts = buildSystemCommon(s);
       if (s.instTextMsg) sysParts.push('[指令]\n' + s.instTextMsg);
       sysParts.push(PROACTIVE_NOTE);
@@ -366,17 +373,41 @@ async function runProactiveCheck() {
       apiMessages.push({ role: 'user', content: userPrompt });
       const reply = await callAI(model, sys, apiMessages, s);
       if (reply) {
-        msgHistory.push({ role: 'assistant', content: reply, _time: nowTW(), _proactive: true });
-        s.msgHistory = msgHistory;
+        msgAppend = { role: 'assistant', content: reply, _time: nowTW(), _proactive: true };
+        msgFitTrendDate = fit.trendUpdated ? todayStrOf(now) : null;
         proactiveState.dailyCount++;
-        if (fit.trendUpdated) s.fitTrendLastSentDate = todayStrOf(now);
         changed = true;
         await showNotif(s.charName || '訊息', reply.slice(0, 120), s.avatarB64);
       }
     }
   }
 
-  s.proactiveState = proactiveState;
-  s.conversations = conversations;
-  if (changed) { try { await idbSet(SK, s); } catch (e) { console.error('[SW] 寫回 IDB 失敗', e); } }
+  if (!changed) return;
+
+  // 寫回前重新讀一次最新狀態：runProactiveCheck 一開始讀到的 s 只是個舊快照，
+  // 中間呼叫 AI 可能要好幾秒，這段期間如果前景頁面剛好也 save() 了新設定
+  // （例如切換模型、傳了新訊息），絕對不能直接把整包舊 s 寫回去蓋掉它——
+  // 只把這次 SW 自己新產生的訊息，接到「寫回當下」最新資料的陣列後面，
+  // 其他欄位（模型設定等）一律以最新的為準，完全不動。
+  try {
+    const fresh = (await idbGet(SK)) || s;
+    fresh.proactiveState = proactiveState;
+
+    const freshConvs = fresh.conversations || [];
+    convAppends.forEach(({ convId, msg, fitTrendDate }) => {
+      const c = freshConvs.find(c => c.id === convId);
+      if (!c) return;
+      c.history = c.history || [];
+      c.history.push(msg);
+      if (fitTrendDate) c.fitTrendDate = fitTrendDate;
+    });
+    fresh.conversations = freshConvs;
+
+    if (msgAppend) {
+      fresh.msgHistory = [...(fresh.msgHistory || []), msgAppend];
+      if (msgFitTrendDate) fresh.fitTrendLastSentDate = msgFitTrendDate;
+    }
+
+    await idbSet(SK, fresh);
+  } catch (e) { console.error('[SW] 寫回 IDB 失敗', e); }
 }
