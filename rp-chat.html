@@ -229,7 +229,7 @@ details[open] .fit-summary::before { transform: rotate(90deg); }
   padding: 14px 16px 12px; border-bottom: 1px solid var(--border);
   font-size: 16px; font-weight: 600; color: var(--text); flex-shrink: 0;
   background: var(--surface);
-  padding-top: max(24px, calc(14px + env(safe-area-inset-top, 20px)));
+  padding-top: max(32px, calc(14px + env(safe-area-inset-top, 20px) + 10px));
 }
 .page-body { flex: 1; overflow-y: auto; padding: 16px; }
 
@@ -322,7 +322,7 @@ details[open] .fit-summary::before { transform: rotate(90deg); }
   border-bottom: 1px solid var(--border); flex-shrink: 0;
   /* 避開手機狀態列（時間、電量那排）：優先用系統回報的安全區域高度，
      沒有回報（一般瀏覽器/舊裝置）就退回一個固定值，兩種情況都會讓內容整排往下移。 */
-  padding-top: max(20px, env(safe-area-inset-top, 20px));
+  padding-top: max(30px, calc(env(safe-area-inset-top, 20px) + 10px));
 }
 .hdr-av {
   width: 28px; height: 28px; border-radius: 50%;
@@ -668,6 +668,20 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
       <button class="btn-sm" id="pg-gcal-disconnect" style="width:100%;margin-top:8px;display:none">中斷連接</button>
     </div>
     <div class="card" style="max-width:none">
+      <div class="card-title">手機工具</div>
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:8px;line-height:1.5">
+        讓角色可以主動查詢這些資料（跟健康資料一樣是模型自己決定要不要查，不是每次都塞）。定位在一般瀏覽器/PWA 也能用；使用情況只有在原生殼（Android App）裡才拿得到資料。
+      </div>
+      <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;margin-top:4px">
+        <span style="font-size:13px">開放查詢目前位置</span>
+        <input type="checkbox" id="pg-loc-inject" style="width:44px;height:24px;cursor:pointer">
+      </label>
+      <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;margin-top:4px">
+        <span style="font-size:13px">開放查詢手機使用情況</span>
+        <input type="checkbox" id="pg-usage-inject" style="width:44px;height:24px;cursor:pointer">
+      </label>
+    </div>
+    <div class="card" style="max-width:none">
       <div class="card-title">行事曆通知</div>
       <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer">
         <span style="font-size:14px">開啟事件提醒</span>
@@ -1009,6 +1023,7 @@ let currentConvId = null;
 let pendingFiles = [], isLoading = false, abortCtrl = null, darkMode = false;
 let gcalClientId = '', gcalToken = null, gcalTokenExpiry = 0, gcalInject = false, gcalEvents = [], gcalTokenClient = null, gcalSnapshotTime = 0;
 let fitInject = false, fitData = { steps: [], sleep: [], weight: [] }, fitSnapshotTime = 0, fitTrendLastSentDate = '';
+let locInject = false, usageInject = false;
 let proactiveConvIds = [], proactiveState = { lastCheckDate: '', dailyCounts: {} }, proactiveTimer = null;
 let notifications = [], notifEnabled = false, notifLeadMin = 10, notifCheckTimer = null, notifiedIds = new Set();
 let instTextMsg = '', msgHistory = [], msgArchives = [], msgPendingFiles = [], proactiveMsgEnabled = false, msgModel = 'claude-sonnet-4-6', proactiveHours = 3;
@@ -1092,6 +1107,8 @@ async function loadState() {
       gcalEvents = Array.isArray(s.gcalEvents) ? s.gcalEvents : [];
       gcalSnapshotTime = s.gcalSnapshotTime || 0;
       fitInject = !!s.fitInject;
+      locInject = !!s.locInject;
+      usageInject = !!s.usageInject;
       fitData = s.fitData || { steps: [], sleep: [], weight: [] };
       if (!Array.isArray(fitData.weight)) fitData.weight = [];
       fitData.sleep = dedupSleepByDate(fitData.sleep || []);
@@ -1149,6 +1166,7 @@ async function save() {
       apiKey, dsKey, oaiKey, charName, avatarB64, docs, instText, thinkingEnabled, searchEnabled,
       darkMode, gcalClientId, gcalInject, gcalEvents, gcalSnapshotTime,
       fitInject, fitData, fitSnapshotTime, fitTrendLastSentDate, proactiveConvIds, proactiveState,
+      locInject, usageInject,
       notifications, notifEnabled, notifLeadMin, notifiedIds: Array.from(notifiedIds),
       instTextMsg, msgHistory, msgArchives, proactiveMsgEnabled, msgModel, proactiveHours,
       conversations, currentConvId,
@@ -1174,9 +1192,14 @@ async function syncPendingProactiveFromNative() {
   pending.forEach(item => {
     if (item.scope === 'conv' && item.convId && item.msg) {
       const conv = conversations.find(c => c.id === item.convId);
-      if (conv) { conv.history.push(item.msg); changed = true; }
+      if (conv) {
+        conv.history.push(item.msg);
+        if (item.fitTrendDate) conv.fitTrendDate = item.fitTrendDate;
+        changed = true;
+      }
     } else if (item.scope === 'chat' && item.msg) {
       msgHistory.push(item.msg);
+      if (item.fitTrendDate) fitTrendLastSentDate = item.fitTrendDate;
       changed = true;
     }
   });
@@ -1674,72 +1697,131 @@ function buildFitContext(conv) {
 
 // 供模型自己選擇調用的健康資料工具
 function getHealthTools() {
-  if (!fitInject) return [];
-  return [
-    {
-      name: 'get_today_health',
-      description: '查詢使用者「今天」的步數與睡眠資料。',
+  const tools = [];
+  if (fitInject) {
+    tools.push(
+      {
+        name: 'get_today_health',
+        description: '查詢使用者「今天」的步數與睡眠資料。',
+        input_schema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'get_recent_health',
+        description: '查詢使用者「最近 5 天（含今天）」的步數與睡眠趨勢，可用來判斷最近作息、活動量的變化。',
+        input_schema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'get_latest_weight',
+        description: '查詢使用者「最新一筆」體重紀錄（使用者手動輸入的資料）。',
+        input_schema: { type: 'object', properties: {} }
+      },
+      {
+        name: 'get_weight_history',
+        description: '查詢使用者「全部體重紀錄」（最多 5 筆，使用者手動輸入的資料），可用來判斷體重變化趨勢。',
+        input_schema: { type: 'object', properties: {} }
+      }
+    );
+  }
+  if (locInject) {
+    tools.push({
+      name: 'get_location',
+      description: '查詢使用者「目前所在位置」（經緯度與粗略地點）。使用者可能會拒絕授權，這種情況下查詢會失敗。',
       input_schema: { type: 'object', properties: {} }
-    },
-    {
-      name: 'get_recent_health',
-      description: '查詢使用者「最近 5 天（含今天）」的步數與睡眠趨勢，可用來判斷最近作息、活動量的變化。',
-      input_schema: { type: 'object', properties: {} }
-    },
-    {
-      name: 'get_latest_weight',
-      description: '查詢使用者「最新一筆」體重紀錄（使用者手動輸入的資料）。',
-      input_schema: { type: 'object', properties: {} }
-    },
-    {
-      name: 'get_weight_history',
-      description: '查詢使用者「全部體重紀錄」（最多 5 筆，使用者手動輸入的資料），可用來判斷體重變化趨勢。',
-      input_schema: { type: 'object', properties: {} }
-    }
-  ];
+    });
+  }
+  if (usageInject) {
+    tools.push({
+      name: 'get_recent_app_usage',
+      description: '查詢使用者手機「最近幾小時」各 App 的使用時長，可用來判斷使用者最近在做什麼、是否一直盯著手機。只有在原生 App 殼裡才查得到資料，一般瀏覽器/PWA 會查詢失敗。',
+      input_schema: {
+        type: 'object',
+        properties: { hours: { type: 'number', description: '要查詢最近幾小時的使用情況，預設 6 小時' } }
+      }
+    });
+  }
+  return tools;
 }
 
 // 同一組工具的 OpenAI/DeepSeek（function calling）格式版本
 function getHealthToolsOpenAI() {
-  if (!fitInject) return [];
-  return [
-    {
+  const tools = [];
+  if (fitInject) {
+    tools.push(
+      {
+        type: 'function',
+        function: {
+          name: 'get_today_health',
+          description: '查詢使用者「今天」的步數與睡眠資料。',
+          parameters: { type: 'object', properties: {} }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'get_recent_health',
+          description: '查詢使用者「最近 5 天（含今天）」的步數與睡眠趨勢，可用來判斷最近作息、活動量的變化。',
+          parameters: { type: 'object', properties: {} }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'get_latest_weight',
+          description: '查詢使用者「最新一筆」體重紀錄（使用者手動輸入的資料）。',
+          parameters: { type: 'object', properties: {} }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'get_weight_history',
+          description: '查詢使用者「全部體重紀錄」（最多 5 筆，使用者手動輸入的資料），可用來判斷體重變化趨勢。',
+          parameters: { type: 'object', properties: {} }
+        }
+      }
+    );
+  }
+  if (locInject) {
+    tools.push({
       type: 'function',
       function: {
-        name: 'get_today_health',
-        description: '查詢使用者「今天」的步數與睡眠資料。',
+        name: 'get_location',
+        description: '查詢使用者「目前所在位置」（經緯度與粗略地點）。使用者可能會拒絕授權，這種情況下查詢會失敗。',
         parameters: { type: 'object', properties: {} }
       }
-    },
-    {
+    });
+  }
+  if (usageInject) {
+    tools.push({
       type: 'function',
       function: {
-        name: 'get_recent_health',
-        description: '查詢使用者「最近 5 天（含今天）」的步數與睡眠趨勢，可用來判斷最近作息、活動量的變化。',
-        parameters: { type: 'object', properties: {} }
+        name: 'get_recent_app_usage',
+        description: '查詢使用者手機「最近幾小時」各 App 的使用時長，可用來判斷使用者最近在做什麼、是否一直盯著手機。只有在原生 App 殼裡才查得到資料，一般瀏覽器/PWA 會查詢失敗。',
+        parameters: {
+          type: 'object',
+          properties: { hours: { type: 'number', description: '要查詢最近幾小時的使用情況，預設 6 小時' } }
+        }
       }
-    },
-    {
-      type: 'function',
-      function: {
-        name: 'get_latest_weight',
-        description: '查詢使用者「最新一筆」體重紀錄（使用者手動輸入的資料）。',
-        parameters: { type: 'object', properties: {} }
-      }
-    },
-    {
-      type: 'function',
-      function: {
-        name: 'get_weight_history',
-        description: '查詢使用者「全部體重紀錄」（最多 5 筆，使用者手動輸入的資料），可用來判斷體重變化趨勢。',
-        parameters: { type: 'object', properties: {} }
-      }
-    }
-  ];
+    });
+  }
+  return tools;
 }
 
-// 實際執行健康工具查詢，回傳給模型的文字內容
-function executeHealthTool(name) {
+// 用 Promise 包一層 navigator.geolocation（callback 風格）方便 await
+function getBrowserLocation() {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) { reject(new Error('此環境不支援定位')); return; }
+    navigator.geolocation.getCurrentPosition(
+      pos => resolve(pos.coords),
+      err => reject(err),
+      { enableHighAccuracy: false, timeout: 10000, maximumAge: 5 * 60 * 1000 }
+    );
+  });
+}
+
+// 實際執行健康/定位/使用情況工具查詢，回傳給模型的文字內容。input 是模型呼叫工具時附帶的參數（可能是 {}）。
+async function executeHealthTool(name, input) {
+  input = input || {};
   const todayStr = new Date().toISOString().slice(0, 10);
   if (name === 'get_today_health') {
     const todaySteps = fitData.steps.find(s => s.date === todayStr);
@@ -1781,7 +1863,42 @@ function executeHealthTool(name) {
     if (!fitData.weight || !fitData.weight.length) return '使用者目前沒有輸入過體重紀錄。';
     return '體重紀錄（由舊到新）：' + fitData.weight.map(w => `${w.date} ${w.value}kg`).join('、');
   }
-  return '（未知的健康工具）';
+  if (name === 'get_location') {
+    try {
+      const coords = await getBrowserLocation();
+      let place = '';
+      try {
+        // 用免費、不需要 API key 的 OSM reverse geocoding 查粗略地名，失敗就只給經緯度
+        const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${coords.latitude}&lon=${coords.longitude}&zoom=14`);
+        if (res.ok) { const d = await res.json(); place = d.display_name || ''; }
+      } catch(e) {}
+      const coordStr = `經緯度：${coords.latitude.toFixed(5)}, ${coords.longitude.toFixed(5)}（誤差約 ${Math.round(coords.accuracy)} 公尺）`;
+      return place ? `${coordStr}\n粗略地點：${place}` : coordStr;
+    } catch(e) {
+      return '無法取得使用者目前位置（可能拒絕了定位授權，或裝置不支援）。';
+    }
+  }
+  if (name === 'get_recent_app_usage') {
+    if (!(window.AndroidBridge && window.AndroidBridge.getUsageStats)) {
+      return '目前環境查不到使用情況（只有在原生 App 殼裡才支援這個功能）。';
+    }
+    const hours = (typeof input.hours === 'number' && input.hours > 0) ? input.hours : 6;
+    if (!window.AndroidBridge.hasUsageAccess()) {
+      return '使用者還沒授權「使用狀況存取權」，查不到資料。可以請使用者到手機設定裡開啟。';
+    }
+    try {
+      const list = JSON.parse(window.AndroidBridge.getUsageStats(hours) || '[]');
+      if (!list.length) return `最近 ${hours} 小時沒有偵測到明顯的 App 使用紀錄。`;
+      const lines = list.slice(0, 8).map(x => {
+        const mins = Math.round(x.totalMs / 60000);
+        return `${x.package}：約 ${mins} 分鐘`;
+      });
+      return `最近 ${hours} 小時使用情況（依時長排序，只列前幾名，套件名稱可能需要自己判斷是什麼 App）：\n` + lines.join('\n');
+    } catch(e) {
+      return '讀取使用情況時發生錯誤。';
+    }
+  }
+  return '（未知的工具）';
 }
 
 // 在 Claude 的 messages 陣列最後一則訊息加上 cache_control 斷點，讓「這則之前的所有歷史」被快取。
@@ -2913,6 +3030,8 @@ function fillSettingsPage() {
   document.getElementById('pg-gcal-disconnect').style.display = gcalToken ? 'block' : 'none';
   document.getElementById('pg-notif-toggle').checked = notifEnabled;
   document.getElementById('pg-fit-inject').checked = fitInject;
+  document.getElementById('pg-loc-inject').checked = locInject;
+  document.getElementById('pg-usage-inject').checked = usageInject;
   // 對話頁主動訊息綁定會在下面
 document.getElementById('pg-proactive-msg').checked = proactiveMsgEnabled;
   document.getElementById('pg-proactive-hours').value = proactiveHours;
@@ -2949,6 +3068,14 @@ document.getElementById('pg-gcal-inject').addEventListener('change', e=>{
 });
 document.getElementById('pg-fit-inject').addEventListener('change', e=>{
   fitInject = e.target.checked;
+  save();
+});
+document.getElementById('pg-loc-inject').addEventListener('change', e=>{
+  locInject = e.target.checked;
+  save();
+});
+document.getElementById('pg-usage-inject').addEventListener('change', e=>{
+  usageInject = e.target.checked;
   save();
 });
 document.getElementById('pg-gcal-disconnect').addEventListener('click', ()=>{
@@ -3861,7 +3988,7 @@ async function runClaudeWithTools(initialMessages, body, headers, url, abortSign
       if (reply) assistantContent.push({ type: 'text', text: reply });
       toolCalls.forEach(tc => assistantContent.push({ type: 'tool_use', id: tc.id, name: tc.name, input: tc.input }));
       messages = [...messages, { role: 'assistant', content: assistantContent }];
-      const toolResults = toolCalls.map(tc => ({ type: 'tool_result', tool_use_id: tc.id, content: executeHealthTool(tc.name) }));
+      const toolResults = await Promise.all(toolCalls.map(async tc => ({ type: 'tool_result', tool_use_id: tc.id, content: await executeHealthTool(tc.name, tc.input) })));
       messages = [...messages, { role: 'user', content: toolResults }];
       continue;
     }
@@ -3886,7 +4013,7 @@ async function runClaudeWithToolsNonStream(initialMessages, body, headers, url) 
       if (textBlock?.text) assistantContent.push({ type: 'text', text: textBlock.text });
       toolBlocks.forEach(tb => assistantContent.push({ type: 'tool_use', id: tb.id, name: tb.name, input: tb.input }));
       messages = [...messages, { role: 'assistant', content: assistantContent }];
-      const toolResults = toolBlocks.map(tb => ({ type: 'tool_result', tool_use_id: tb.id, content: executeHealthTool(tb.name) }));
+      const toolResults = await Promise.all(toolBlocks.map(async tb => ({ type: 'tool_result', tool_use_id: tb.id, content: await executeHealthTool(tb.name, tb.input) })));
       messages = [...messages, { role: 'user', content: toolResults }];
       continue;
     }
@@ -3911,7 +4038,9 @@ async function runOpenAIWithTools(initialMessages, body, headers, url, useDS, us
         content: reply || null,
         tool_calls: toolCalls.map(tc => ({ id: tc.id, type: 'function', function: { name: tc.name, arguments: JSON.stringify(tc.input) } }))
       }];
-      toolCalls.forEach(tc => messages.push({ role: 'tool', tool_call_id: tc.id, content: executeHealthTool(tc.name) }));
+      for (const tc of toolCalls) {
+        messages.push({ role: 'tool', tool_call_id: tc.id, content: await executeHealthTool(tc.name, tc.input) });
+      }
       continue;
     }
     break;
@@ -3933,7 +4062,11 @@ async function runOpenAIWithToolsNonStream(initialMessages, body, headers, url) 
     if (text) accumulatedReply += text;
     if (toolCalls.length) {
       messages = [...messages, { role: 'assistant', content: text || null, tool_calls: toolCalls }];
-      toolCalls.forEach(tc => messages.push({ role: 'tool', tool_call_id: tc.id, content: executeHealthTool(tc.function?.name) }));
+      for (const tc of toolCalls) {
+        let parsedInput = {};
+        try { parsedInput = tc.function?.arguments ? JSON.parse(tc.function.arguments) : {}; } catch(e) {}
+        messages.push({ role: 'tool', tool_call_id: tc.id, content: await executeHealthTool(tc.function?.name, parsedInput) });
+      }
       continue;
     }
     break;
