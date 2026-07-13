@@ -1151,6 +1151,13 @@ async function loadState() {
     if (notifEnabled) startNotifTimer();
     startProactiveTimer();
     await syncPendingProactiveFromNative();
+    // 還原到上次離開時所在的頁面（例如設定頁），而不是每次重新整理/重開都彈回主頁。
+    try {
+      const lastPage = localStorage.getItem('rp_last_page');
+      if (lastPage && lastPage !== 'home' && document.querySelector(`.page[data-page="${lastPage}"]`)) {
+        switchPage(lastPage);
+      }
+    } catch(e) {}
   } catch(e) { console.error('load failed', e); }
 }
 loadState();
@@ -1322,6 +1329,9 @@ function showChat() { initHome(); }
 function switchPage(target) {
   document.querySelectorAll('.page').forEach(p => p.classList.toggle('active', p.dataset.page===target));
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.target===target));
+  // 記住目前在哪一頁：App 從背景切回來時可能會被迫重新整理，靠這個把使用者帶回原本那一頁，
+  // 而不是每次都彈回主頁。
+  try { localStorage.setItem('rp_last_page', target); } catch(e) {}
   if (target==='settings') fillSettingsPage();
   if (target==='home') initHome();
   if (target==='messages') {
