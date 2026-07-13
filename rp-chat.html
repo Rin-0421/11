@@ -680,6 +680,10 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
         <span style="font-size:13px">開放查詢手機使用情況</span>
         <input type="checkbox" id="pg-usage-inject" style="width:44px;height:24px;cursor:pointer">
       </label>
+      <div id="pg-usage-access-row" style="display:none;margin-top:8px;padding:8px;border-radius:8px;background:var(--surface2);font-size:11px">
+        使用狀況存取權狀態：<span id="pg-usage-access-status" style="font-weight:600">檢查中…</span>
+        <button class="btn-sm" id="pg-usage-access-btn" style="margin-left:6px;padding:2px 8px;font-size:11px">前往開啟</button>
+      </div>
     </div>
     <div class="card" style="max-width:none">
       <div class="card-title">行事曆通知</div>
@@ -1162,22 +1166,25 @@ async function loadState() {
 }
 loadState();
 
-// ── 鍵盤跳出來時，自動把正在打字的輸入框捲到看得到的地方 ──
-// 不依賴原生殼那邊的視窗調整行為（在某些機型上不可靠），直接在網頁層自己處理：
-// 1. 監聽 visualViewport 的 resize（鍵盤跳出/收起時視覺可視區域會變）
-// 2. 監聽 focusin，輸入框一取得焦點就排一次捲動（保險，等鍵盤動畫跑完再捲）
-function scrollActiveInputIntoView() {
-  const el = document.activeElement;
-  if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {
-    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+// ── 鍵盤跳出來時，讓整個版面的高度直接跟著鍵盤縮，把輸入框留在鍵盤正上方 ──
+// 不依賴瀏覽器/系統自己判斷要不要縮版面（不同機型行為不一致，之前試過的方式都不夠穩），
+// 直接讀 visualViewport 目前「真正看得到」的高度，手動蓋掉 body 的高度。
+// body 本身是 flex column，輸入框在最下面且 flex-shrink:0，body 一變矮，輸入框自然貼齊新的底部（也就是鍵盤上緣）。
+function updateViewportHeight() {
+  if (window.visualViewport) {
+    document.body.style.height = window.visualViewport.height + 'px';
   }
 }
 if (window.visualViewport) {
-  window.visualViewport.addEventListener('resize', () => setTimeout(scrollActiveInputIntoView, 80));
+  window.visualViewport.addEventListener('resize', updateViewportHeight);
+  window.visualViewport.addEventListener('scroll', updateViewportHeight);
+  updateViewportHeight();
 }
+// 保險：輸入框取得焦點時，等鍵盤動畫跑完，把目前作用中的輸入框捲到看得到的地方
+// （版面已經縮到鍵盤上緣了，這步主要是處理「輸入框本身位置在很上面、鍵盤又還沒完全彈出」的過渡瞬間）
 document.addEventListener('focusin', (e) => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
-    setTimeout(scrollActiveInputIntoView, 300);
+    setTimeout(() => e.target.scrollIntoView({ block: 'end', behavior: 'smooth' }), 300);
   }
 });
 
@@ -3061,6 +3068,7 @@ function fillSettingsPage() {
   document.getElementById('pg-fit-inject').checked = fitInject;
   document.getElementById('pg-loc-inject').checked = locInject;
   document.getElementById('pg-usage-inject').checked = usageInject;
+  updateUsageAccessRow();
   // 對話頁主動訊息綁定會在下面
 document.getElementById('pg-proactive-msg').checked = proactiveMsgEnabled;
   document.getElementById('pg-proactive-hours').value = proactiveHours;
@@ -3074,6 +3082,27 @@ document.getElementById('pg-proactive-msg').checked = proactiveMsgEnabled;
   setAv('pg-av-img','pg-av-ph',avatarB64);
   renderDocs('pg-doc-list');
 }
+
+// 使用狀況存取權：只有在原生殼（有 AndroidBridge）裡才顯示這排狀態/按鈕，
+// 一般瀏覽器/PWA 完全沒有這個功能，不用顯示誤導使用者。
+function updateUsageAccessRow() {
+  const row = document.getElementById('pg-usage-access-row');
+  const status = document.getElementById('pg-usage-access-status');
+  if (!row || !status) return;
+  if (!(window.AndroidBridge && window.AndroidBridge.hasUsageAccess)) {
+    row.style.display = 'none';
+    return;
+  }
+  row.style.display = '';
+  const granted = window.AndroidBridge.hasUsageAccess();
+  status.textContent = granted ? '已授權' : '尚未授權';
+  status.style.color = granted ? 'var(--accent)' : '#c0392b';
+}
+document.getElementById('pg-usage-access-btn')?.addEventListener('click', () => {
+  if (window.AndroidBridge && window.AndroidBridge.openUsageAccessSettings) {
+    window.AndroidBridge.openUsageAccessSettings();
+  }
+});
 
 // 綁定設定頁的頭像
 bindAv('pg-av-btn','pg-av-upload-btn','pg-av-file','pg-av-img','pg-av-ph');
