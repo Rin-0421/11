@@ -1162,6 +1162,25 @@ async function loadState() {
 }
 loadState();
 
+// ── 鍵盤跳出來時，自動把正在打字的輸入框捲到看得到的地方 ──
+// 不依賴原生殼那邊的視窗調整行為（在某些機型上不可靠），直接在網頁層自己處理：
+// 1. 監聽 visualViewport 的 resize（鍵盤跳出/收起時視覺可視區域會變）
+// 2. 監聽 focusin，輸入框一取得焦點就排一次捲動（保險，等鍵盤動畫跑完再捲）
+function scrollActiveInputIntoView() {
+  const el = document.activeElement;
+  if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }
+}
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', () => setTimeout(scrollActiveInputIntoView, 80));
+}
+document.addEventListener('focusin', (e) => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+    setTimeout(scrollActiveInputIntoView, 300);
+  }
+});
+
 // ── Save ──
 async function save() {
   try {
