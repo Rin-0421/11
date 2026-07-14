@@ -231,7 +231,9 @@ details[open] .fit-summary::before { transform: rotate(90deg); }
   padding: 14px 16px 12px; border-bottom: 1px solid var(--border);
   font-size: 16px; font-weight: 600; color: var(--text); flex-shrink: 0;
   background: var(--surface);
-  padding-top: max(32px, calc(14px + env(safe-area-inset-top, 20px) + 10px));
+  /* 系統本身已經會避開狀態列了，這裡只在真的偵測到安全區時才多加一點點；
+     沒有真實 inset 值就完全不多加，避免看起來留白過多。 */
+  padding-top: calc(14px + env(safe-area-inset-top, 0px));
 }
 .page-body { flex: 1; overflow-y: auto; padding: 16px; }
 
@@ -322,9 +324,9 @@ details[open] .fit-summary::before { transform: rotate(90deg); }
   display: flex; align-items: center; gap: 7px;
   padding: 8px 12px; background: var(--surface);
   border-bottom: 1px solid var(--border); flex-shrink: 0;
-  /* 避開手機狀態列（時間、電量那排）：優先用系統回報的安全區域高度，
-     沒有回報（一般瀏覽器/舊裝置）就退回一個固定值，兩種情況都會讓內容整排往下移。 */
-  padding-top: max(30px, calc(env(safe-area-inset-top, 20px) + 10px));
+  /* 系統本身已經會避開狀態列了，這裡只在真的偵測到安全區時才多加一點點；
+     沒有真實 inset 值就完全不多加，避免看起來留白過多。 */
+  padding-top: calc(8px + env(safe-area-inset-top, 0px));
 }
 .hdr-av {
   width: 28px; height: 28px; border-radius: 50%;
