@@ -2003,9 +2003,9 @@ async function executeHealthTool(name, input) {
       if (!list.length) return `最近 ${hours} 小時沒有偵測到明顯的 App 使用紀錄。`;
       const lines = list.slice(0, 8).map(x => {
         const mins = Math.round(x.totalMs / 60000);
-        return `${x.package}：約 ${mins} 分鐘`;
+        return `${x.label || x.package}：約 ${mins} 分鐘`;
       });
-      return `最近 ${hours} 小時使用情況（依時長排序，只列前幾名，套件名稱可能需要自己判斷是什麼 App）：\n` + lines.join('\n');
+      return `最近 ${hours} 小時使用情況（依時長排序，只列前幾名）：\n` + lines.join('\n');
     } catch(e) {
       return '讀取使用情況時發生錯誤。';
     }
