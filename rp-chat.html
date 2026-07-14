@@ -1184,6 +1184,11 @@ async function loadState() {
     if (notifEnabled) startNotifTimer();
     startProactiveTimer();
     await syncPendingProactiveFromNative();
+    // 如果原生殼之前已經連過 Google，開啟 App 時自動靜默續期一次 token 並刷新行事曆，
+    // 不用使用者每次都手動按連接／重新整理（Play 服務本身會記住授權，這裡只是主動去問一次）。
+    if (window.AndroidBridge && window.AndroidBridge.isGoogleConnected && window.AndroidBridge.isGoogleConnected()) {
+      ensureGcalTokenNative().then(ok => { if (ok) fetchGcalEvents(); });
+    }
     // 還原到上次離開時所在的頁面（例如設定頁），而不是每次重新整理/重開都彈回主頁。
     try {
       const lastPage = localStorage.getItem('rp_last_page');
@@ -1194,6 +1199,43 @@ async function loadState() {
   } catch(e) { console.error('load failed', e); }
 }
 loadState();
+
+// ── 輸入框草稿：避免 App 重新整理（切背景回來、選檔案回來、Google 授權回來這些都會觸發）
+// 把打到一半、還沒送出的文字清掉。每次打字就存一份到 localStorage，重整後自動還原。
+(function setupDraftPersistence() {
+  const DRAFT_KEY_HOME = 'rp_draft_home';
+  const DRAFT_KEY_MSG = 'rp_draft_messages';
+
+  function bindDraft(inputId, storageKey) {
+    const el = document.getElementById(inputId);
+    if (!el) return;
+    // 還原草稿（如果有的話）
+    try {
+      const saved = localStorage.getItem(storageKey);
+      if (saved) {
+        el.value = saved;
+        el.style.height = 'auto';
+        el.style.height = Math.min(el.scrollHeight, 130) + 'px';
+      }
+    } catch(e) {}
+    // 每次打字就存一份
+    el.addEventListener('input', () => {
+      try {
+        if (el.value) localStorage.setItem(storageKey, el.value);
+        else localStorage.removeItem(storageKey);
+      } catch(e) {}
+    });
+  }
+
+  bindDraft('user-input', DRAFT_KEY_HOME);
+  bindDraft('msg-user-input', DRAFT_KEY_MSG);
+})();
+
+// 訊息真的送出後，要記得把對應的草稿清掉（不然下次重整又跑出已經送過的內容）
+function clearDraft(inputId) {
+  const key = inputId === 'msg-user-input' ? 'rp_draft_messages' : 'rp_draft_home';
+  try { localStorage.removeItem(key); } catch(e) {}
+}
 
 // ── 鍵盤跳出來時，只讓輸入框貼齊鍵盤上緣，底部導覽列（主頁/聊天/設定...）直接讓鍵盤蓋掉 ──
 // 作法：body 高度還是直接用 visualViewport 實際量到的高度覆蓋（不依賴 dvh 在這台裝置上是否可靠），
@@ -2748,7 +2790,7 @@ async function sendMsg() {
   abortCtrl = new AbortController();
   document.getElementById('msg-send-icon').style.display = 'none';
   document.getElementById('msg-stop-icon').style.display = '';
-  ui.value = ''; ui.style.height = 'auto';
+  ui.value = ''; ui.style.height = 'auto'; clearDraft('msg-user-input');
 
   let content, extra = null;
   if (msgPendingFiles.length) {
@@ -3693,7 +3735,7 @@ async function send() {
   document.getElementById('send-btn').disabled=false;
   document.getElementById('send-icon').style.display='none';
   document.getElementById('stop-icon').style.display='';
-  ui.value=''; ui.style.height='auto';
+  ui.value=''; ui.style.height='auto'; clearDraft('user-input');
 
   let content, extra=null;
   if (pendingFiles.length) {
