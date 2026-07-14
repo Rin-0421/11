@@ -162,6 +162,8 @@ body {
   height: 56px;
   z-index: 40;
 }
+/* 鍵盤跳出來時隱藏導覽列，讓輸入框補上這塊空間、貼齊鍵盤上緣，而不是導覽列跟著被推上來 */
+body.keyboard-open #bottom-nav { display: none; }
 .nav-btn {
   flex: 1; background: none; border: none; color: var(--text-dim);
   display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -1181,14 +1183,19 @@ async function loadState() {
 }
 loadState();
 
-// ── 鍵盤跳出來時，讓整個版面的高度直接跟著鍵盤縮，把輸入框留在鍵盤正上方 ──
-// 不依賴瀏覽器/系統自己判斷要不要縮版面（不同機型行為不一致，之前試過的方式都不夠穩），
-// 直接讀 visualViewport 目前「真正看得到」的高度，手動蓋掉 body 的高度。
-// body 本身是 flex column，輸入框在最下面且 flex-shrink:0，body 一變矮，輸入框自然貼齊新的底部（也就是鍵盤上緣）。
+// ── 鍵盤跳出來時，只讓輸入框貼齊鍵盤上緣，底部導覽列（主頁/聊天/設定...）直接讓鍵盤蓋掉 ──
+// 作法：body 高度還是直接用 visualViewport 實際量到的高度覆蓋（不依賴 dvh 在這台裝置上是否可靠），
+// 但鍵盤跳出時額外隱藏底部導覽列，讓目前頁面（flex:1）補滿多出來的空間，
+// 頁面最下面的輸入框（flex-shrink:0）自然就會貼在這個縮小後 body 的最底部，也就是鍵盤上緣；
+// 導覽列本身因為被隱藏，不會跟著被往上推。
+let vvBaselineHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
 function updateViewportHeight() {
-  if (window.visualViewport) {
-    document.body.style.height = window.visualViewport.height + 'px';
-  }
+  if (!window.visualViewport) return;
+  const vh = window.visualViewport.height;
+  if (vh > vvBaselineHeight) vvBaselineHeight = vh; // 記錄目前看過最大的高度，當作「鍵盤收起時」的基準
+  const keyboardOpen = (vvBaselineHeight - vh) > 100; // 差距夠大才算鍵盤跳出來，避免瀏覽器 UI 微幅變化誤判
+  document.body.classList.toggle('keyboard-open', keyboardOpen);
+  document.body.style.height = vh + 'px';
 }
 if (window.visualViewport) {
   window.visualViewport.addEventListener('resize', updateViewportHeight);
@@ -3773,7 +3780,7 @@ async function send() {
   document.getElementById('send-icon').style.display='';
   document.getElementById('stop-icon').style.display='none';
   document.getElementById('send-btn').disabled=false;
-  ui.focus(); scrollBot();
+  scrollBot();
 }
 
 // ── Bubble ──
@@ -4007,7 +4014,7 @@ async function regenerateFrom(historyIdx) {
   document.getElementById('send-icon').style.display='';
   document.getElementById('stop-icon').style.display='none';
   document.getElementById('send-btn').disabled=false;
-  ui.focus(); scrollBot();
+  scrollBot();
 }
 
 function addNotice(text) {
