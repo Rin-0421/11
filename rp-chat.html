@@ -662,9 +662,8 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
         <input class="finput" type="text" id="pg-gcal-cid" placeholder="xxxxx.apps.googleusercontent.com" autocomplete="off" spellcheck="false">
       </div>
       <div id="pg-gcal-android-row" style="display:none">
-        <label class="lbl">Android OAuth 用戶端 ID（原生殼專用，跟上面網頁版是不同的 Google Cloud 用戶端）</label>
-        <input class="finput" type="text" id="pg-gcal-android-cid" placeholder="xxxxx.apps.googleusercontent.com" autocomplete="off" spellcheck="false">
-        <div style="font-size:11px;margin-top:6px;padding:8px;border-radius:8px;background:var(--surface2)">
+        <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px">原生殼直接用套件簽章跟 Google 驗證身份，不需要在這裡填 Client ID（但你要先在 Google Cloud Console 建過對應的 Android OAuth 用戶端）。</div>
+        <div style="font-size:11px;padding:8px;border-radius:8px;background:var(--surface2)">
           連接狀態：<span id="pg-gcal-android-status" style="font-weight:600">檢查中…</span>
           <button class="btn-sm" id="pg-gcal-android-connect-btn" style="margin-left:6px;padding:2px 8px;font-size:11px">連接</button>
         </div>
@@ -1437,8 +1436,7 @@ function initGcalClient() {
 
 function gcalConnect() {
   if (window.AndroidBridge && window.AndroidBridge.googleConnect) {
-    if (!gcalAndroidClientId) { alert('請先在設定頁填入「Android OAuth 用戶端 ID」'); switchPage('settings'); return; }
-    window.AndroidBridge.googleConnect(gcalAndroidClientId);
+    window.AndroidBridge.googleConnect(''); // 這套新流程不用傳 Client ID，參數留空即可
     return;
   }
   if (!gcalClientId) { alert('請先在設定頁填入 OAuth 用戶端 ID'); switchPage('settings'); return; }
@@ -3150,7 +3148,6 @@ function applyDarkMode() {
 function fillSettingsPage() {
   document.getElementById('pg-dark-toggle').checked = darkMode;
   document.getElementById('pg-gcal-cid').value = gcalClientId || '';
-  document.getElementById('pg-gcal-android-cid').value = gcalAndroidClientId || '';
   const isNative = !!(window.AndroidBridge && window.AndroidBridge.googleConnect);
   document.getElementById('pg-gcal-web-row').style.display = isNative ? 'none' : '';
   document.getElementById('pg-gcal-android-row').style.display = isNative ? '' : 'none';
@@ -3208,10 +3205,6 @@ function updateGcalAndroidStatus() {
   const disconnectBtn = document.getElementById('pg-gcal-disconnect');
   if (disconnectBtn) disconnectBtn.style.display = connected ? 'block' : 'none';
 }
-document.getElementById('pg-gcal-android-cid')?.addEventListener('change', e=>{
-  gcalAndroidClientId = e.target.value.trim();
-  save();
-});
 document.getElementById('pg-gcal-android-connect-btn')?.addEventListener('click', gcalConnect);
 
 // 綁定設定頁的頭像
