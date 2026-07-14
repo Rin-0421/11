@@ -657,8 +657,18 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
     </div>
     <div class="card" style="max-width:none">
       <div class="card-title">Google</div>
-      <label class="lbl">OAuth 用戶端 ID</label>
-      <input class="finput" type="text" id="pg-gcal-cid" placeholder="xxxxx.apps.googleusercontent.com" autocomplete="off" spellcheck="false">
+      <div id="pg-gcal-web-row">
+        <label class="lbl">OAuth 用戶端 ID（網頁版）</label>
+        <input class="finput" type="text" id="pg-gcal-cid" placeholder="xxxxx.apps.googleusercontent.com" autocomplete="off" spellcheck="false">
+      </div>
+      <div id="pg-gcal-android-row" style="display:none">
+        <label class="lbl">Android OAuth 用戶端 ID（原生殼專用，跟上面網頁版是不同的 Google Cloud 用戶端）</label>
+        <input class="finput" type="text" id="pg-gcal-android-cid" placeholder="xxxxx.apps.googleusercontent.com" autocomplete="off" spellcheck="false">
+        <div style="font-size:11px;margin-top:6px;padding:8px;border-radius:8px;background:var(--surface2)">
+          連接狀態：<span id="pg-gcal-android-status" style="font-weight:600">檢查中…</span>
+          <button class="btn-sm" id="pg-gcal-android-connect-btn" style="margin-left:6px;padding:2px 8px;font-size:11px">連接</button>
+        </div>
+      </div>
       <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;margin-top:4px">
         <span style="font-size:13px">送訊息時附上今日行程</span>
         <input type="checkbox" id="pg-gcal-inject" style="width:44px;height:24px;cursor:pointer">
@@ -1041,7 +1051,7 @@ let searchEnabled = false;
 let conversations = []; // [{ id, name, history }]
 let currentConvId = null;
 let pendingFiles = [], isLoading = false, abortCtrl = null, darkMode = false;
-let gcalClientId = '', gcalToken = null, gcalTokenExpiry = 0, gcalInject = false, gcalEvents = [], gcalTokenClient = null, gcalSnapshotTime = 0;
+let gcalClientId = '', gcalAndroidClientId = '', gcalToken = null, gcalTokenExpiry = 0, gcalInject = false, gcalEvents = [], gcalTokenClient = null, gcalSnapshotTime = 0;
 let fitInject = false, fitData = { steps: [], sleep: [], weight: [] }, fitSnapshotTime = 0, fitTrendLastSentDate = '';
 let locInject = false, usageInject = false;
 let proactiveConvIds = [], proactiveState = { lastCheckDate: '', dailyCounts: {} }, proactiveTimer = null;
@@ -1123,6 +1133,7 @@ async function loadState() {
       searchEnabled = s.searchEnabled || false;
       darkMode = !!s.darkMode;
       gcalClientId = s.gcalClientId || '';
+      gcalAndroidClientId = s.gcalAndroidClientId || '';
       gcalInject = !!s.gcalInject;
       gcalEvents = Array.isArray(s.gcalEvents) ? s.gcalEvents : [];
       gcalSnapshotTime = s.gcalSnapshotTime || 0;
@@ -1219,7 +1230,7 @@ async function save() {
     // 預設值，就會把錯誤的 claude-sonnet-4-6 寫回存檔，蓋掉使用者真正選的模型。
     const stateForSave = {
       apiKey, dsKey, oaiKey, charName, avatarB64, docs, instText, thinkingEnabled, searchEnabled,
-      darkMode, gcalClientId, gcalInject, gcalEvents, gcalSnapshotTime,
+      darkMode, gcalClientId, gcalAndroidClientId, gcalInject, gcalEvents, gcalSnapshotTime,
       fitInject, fitData, fitSnapshotTime, fitTrendLastSentDate, proactiveConvIds, proactiveState,
       locInject, usageInject,
       notifications, notifEnabled, notifLeadMin, notifiedIds: Array.from(notifiedIds),
@@ -1425,12 +1436,24 @@ function initGcalClient() {
 }
 
 function gcalConnect() {
+  if (window.AndroidBridge && window.AndroidBridge.googleConnect) {
+    if (!gcalAndroidClientId) { alert('請先在設定頁填入「Android OAuth 用戶端 ID」'); switchPage('settings'); return; }
+    window.AndroidBridge.googleConnect(gcalAndroidClientId);
+    return;
+  }
   if (!gcalClientId) { alert('請先在設定頁填入 OAuth 用戶端 ID'); switchPage('settings'); return; }
   if (!initGcalClient()) { alert('Google 服務尚未載入，請稍後再試'); return; }
   gcalTokenClient.requestAccessToken({ prompt: 'consent' });
 }
 
 function gcalDisconnect() {
+  if (window.AndroidBridge && window.AndroidBridge.googleDisconnect) {
+    window.AndroidBridge.googleDisconnect();
+    gcalToken = null; gcalTokenExpiry = 0; gcalEvents = [];
+    renderGcalPage();
+    updateGcalAndroidStatus();
+    return;
+  }
   if (gcalToken && window.google?.accounts?.oauth2) {
     google.accounts.oauth2.revoke(gcalToken, ()=>{});
   }
@@ -1440,7 +1463,38 @@ function gcalDisconnect() {
   if (btn) btn.style.display = 'none';
 }
 
+// ── 原生殼的 Google 登入結果，從 MainActivity.kt 呼叫過來 ──
+window.onGoogleAuthResult = function(ok, err) {
+  if (ok) {
+    ensureGcalTokenNative().then(success => { if (success) fetchGcalEvents(); });
+    updateGcalAndroidStatus();
+  } else {
+    alert('Google 連接失敗：' + (err || '未知錯誤（可能是使用者取消了）'));
+  }
+};
+
+// 一次只會有一個 token 請求在飛，用一個佇列裝等待中的 resolve function 就夠了
+let _pendingGoogleTokenResolvers = [];
+window.onGoogleTokenResult = function(token, expiresAtMs, err) {
+  const resolvers = _pendingGoogleTokenResolvers;
+  _pendingGoogleTokenResolvers = [];
+  if (token) { gcalToken = token; gcalTokenExpiry = (expiresAtMs && expiresAtMs > Date.now()) ? expiresAtMs - 60000 : Date.now() + 3500000; }
+  else if (err) console.error('取得 Google token 失敗：' + err);
+  resolvers.forEach(r => r(!!token));
+};
+
+function ensureGcalTokenNative() {
+  if (gcalToken && Date.now() < gcalTokenExpiry) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    _pendingGoogleTokenResolvers.push(resolve);
+    window.AndroidBridge.requestGoogleAccessToken();
+  });
+}
+
 async function ensureGcalToken() {
+  if (window.AndroidBridge && window.AndroidBridge.requestGoogleAccessToken) {
+    return ensureGcalTokenNative();
+  }
   if (gcalToken && Date.now() < gcalTokenExpiry) return true;
   if (!gcalClientId) return false;
   if (!initGcalClient()) return false;
@@ -3096,6 +3150,11 @@ function applyDarkMode() {
 function fillSettingsPage() {
   document.getElementById('pg-dark-toggle').checked = darkMode;
   document.getElementById('pg-gcal-cid').value = gcalClientId || '';
+  document.getElementById('pg-gcal-android-cid').value = gcalAndroidClientId || '';
+  const isNative = !!(window.AndroidBridge && window.AndroidBridge.googleConnect);
+  document.getElementById('pg-gcal-web-row').style.display = isNative ? 'none' : '';
+  document.getElementById('pg-gcal-android-row').style.display = isNative ? '' : 'none';
+  if (isNative) updateGcalAndroidStatus();
   document.getElementById('pg-gcal-inject').checked = gcalInject;
   document.getElementById('pg-gcal-disconnect').style.display = gcalToken ? 'block' : 'none';
   document.getElementById('pg-notif-toggle').checked = notifEnabled;
@@ -3138,6 +3197,22 @@ document.getElementById('pg-usage-access-btn')?.addEventListener('click', () => 
     window.AndroidBridge.openUsageAccessSettings();
   }
 });
+
+// 原生殼的 Google 連接狀態顯示
+function updateGcalAndroidStatus() {
+  const status = document.getElementById('pg-gcal-android-status');
+  if (!status || !(window.AndroidBridge && window.AndroidBridge.isGoogleConnected)) return;
+  const connected = window.AndroidBridge.isGoogleConnected();
+  status.textContent = connected ? '已連接 ✓' : '尚未連接';
+  status.style.color = connected ? 'var(--accent)' : '#c0392b';
+  const disconnectBtn = document.getElementById('pg-gcal-disconnect');
+  if (disconnectBtn) disconnectBtn.style.display = connected ? 'block' : 'none';
+}
+document.getElementById('pg-gcal-android-cid')?.addEventListener('change', e=>{
+  gcalAndroidClientId = e.target.value.trim();
+  save();
+});
+document.getElementById('pg-gcal-android-connect-btn')?.addEventListener('click', gcalConnect);
 
 // 綁定設定頁的頭像
 bindAv('pg-av-btn','pg-av-upload-btn','pg-av-file','pg-av-img','pg-av-ph');
