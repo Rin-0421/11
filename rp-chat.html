@@ -1060,7 +1060,7 @@ let notifications = [], notifEnabled = false, notifLeadMin = 10, notifCheckTimer
 let instTextMsg = '', msgHistory = [], msgArchives = [], msgPendingFiles = [], proactiveMsgEnabled = false, msgModel = 'claude-sonnet-4-6', proactiveHours = 3, proactiveMaxDaily = 3;
 const NOTIF_VIEW_ID = '__notifications__';
 
-const COMPRESS_THRESHOLD = 50;
+const COMPRESS_THRESHOLD = 80;
 const KEEP_RECENT = 10;
 
 // ── Helpers ──
@@ -2574,7 +2574,7 @@ function renderMsgPage() {
 }
 
 // 對話頁：編輯訊息
-function editMsgMessage(idx) {
+async function editMsgMessage(idx) {
   const msg = msgHistory[idx];
   if (!msg || msg.role !== 'user') return;
   const currentText = typeof msg.content === 'string' ? msg.content
@@ -2593,6 +2593,8 @@ function editMsgMessage(idx) {
   msgHistory = msgHistory.slice(0, idx + 1);
   save();
   renderMsgPage();
+  // 改完之後要真的重新呼叫模型，從這句開始產生新回覆，不然會卡在這句沒有下文
+  await regenerateAssistantMsg();
 }
 
 // 對話頁：重新生成回覆
@@ -3944,9 +3946,7 @@ function addBubble(role,text,typing,extra,thinkingText,historyIdx,msgTime) {
       editBtn.className='action-btn'; editBtn.textContent='✏ 編輯';
       editBtn.addEventListener('click', e=>{ e.preventDefault(); e.stopPropagation(); editMessage(historyIdx); });
       actions.appendChild(editBtn);
-      // Toggle on bubble click
-      bbl.style.cursor='pointer';
-      bbl.addEventListener('click', e=>{ e.stopPropagation(); actions.classList.toggle('show'); });
+      actions.classList.add('show');
     } else {
       const copyBtn2=document.createElement('button');
       copyBtn2.className='action-btn'; copyBtn2.textContent='複製';
@@ -3966,24 +3966,30 @@ function addBubble(role,text,typing,extra,thinkingText,historyIdx,msgTime) {
 }
 
 // ── Edit message ──
-function editMessage(historyIdx) {
+async function editMessage(historyIdx) {
   const conv=currentConv(); if (!conv||isLoading) return;
   const msg=conv.history[historyIdx];
-  const text=typeof msg.content==='string'?msg.content
+  if (!msg || msg.role !== 'user') return;
+  const currentText=typeof msg.content==='string'?msg.content
     :Array.isArray(msg.content)?msg.content.filter(b=>b.type==='text').map(b=>b.text).join(''):'';
-  conv.history=conv.history.slice(0,historyIdx);
+  const newText = prompt('編輯訊息：', currentText);
+  if (newText === null) return; // 取消
+  if (!newText.trim()) { alert('訊息不能為空'); return; }
+  // 更新內容（保留原有的圖片 blocks）
+  if (Array.isArray(msg.content)) {
+    const nonText = msg.content.filter(b=>b.type!=='text');
+    msg.content = nonText.length ? [...nonText, {type:'text', text:newText}] : newText;
+  } else {
+    msg.content = newText;
+  }
+  // 刪除該訊息之後的所有內容（因為改了 user，後面模型的回覆已不合理）
+  conv.history = conv.history.slice(0, historyIdx+1);
   save(); renderConvList();
   document.getElementById('messages').innerHTML='';
   renderMessages();
-  // 重繪完再設 input，確保 focus 正確
-  setTimeout(()=>{
-    ui.value=text;
-    ui.style.height='auto';
-    ui.style.height=Math.min(ui.scrollHeight,130)+'px';
-    ui.focus();
-    // 把游標移到最後
-    ui.selectionStart=ui.selectionEnd=ui.value.length;
-  },0);
+  // 重用 regenerateFrom：傳入目前長度，內部的 slice 會是無變化的 no-op，
+  // 直接接著跑「呼叫模型產生新回覆」那段既有邏輯，不用重複寫一次
+  await regenerateFrom(conv.history.length);
 }
 
 // ── Regenerate ──
