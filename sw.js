@@ -287,7 +287,9 @@ async function runProactiveCheck() {
     proactiveState.dailyCount = 0;
     proactiveState.lastCheckDate = todayKey;
   }
-  if (proactiveState.dailyCount >= 3) { s.proactiveState = proactiveState; await idbSet(SK, s); return; }
+  const proactiveHours = (typeof s.proactiveHours === 'number' && s.proactiveHours > 0) ? s.proactiveHours : 3;
+  const proactiveMaxDaily = (typeof s.proactiveMaxDaily === 'number' && s.proactiveMaxDaily > 0) ? s.proactiveMaxDaily : 3;
+  if (proactiveState.dailyCount >= proactiveMaxDaily) { s.proactiveState = proactiveState; await idbSet(SK, s); return; }
 
   let changed = false;
   const conversations = s.conversations || [];
@@ -295,11 +297,10 @@ async function runProactiveCheck() {
   // 收集這次背景檢查實際產生的新內容，最後統一 merge 到「寫回當下」最新的資料上，
   // 而不是直接改這份可能已經過期的 s 快照。
   const convAppends = []; // { convId, msg, fitTrendDate }
-  const proactiveHours = (typeof s.proactiveHours === 'number' && s.proactiveHours > 0) ? s.proactiveHours : 3;
 
   // ── 主頁對話檢查 ──
   for (const convId of proactiveConvIds) {
-    if (proactiveState.dailyCount >= 3) break;
+    if (proactiveState.dailyCount >= proactiveMaxDaily) break;
     const conv = conversations.find(c => c.id === convId);
     if (!conv || !conv.history || !conv.history.length) continue;
     const last = conv.history[conv.history.length - 1];
@@ -337,7 +338,7 @@ async function runProactiveCheck() {
 
   // ── 對話頁檢查 ──
   let msgAppend = null, msgFitTrendDate = null;
-  if (proactiveState.dailyCount < 3 && s.proactiveMsgEnabled) {
+  if (proactiveState.dailyCount < proactiveMaxDaily && s.proactiveMsgEnabled) {
     const msgHistory = s.msgHistory || [];
     const last = msgHistory[msgHistory.length - 1];
     let ok2run = !(last && last.role === 'assistant' && last._proactive);

@@ -740,11 +740,15 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
     <div class="card" style="max-width:none">
       <div class="card-title">主動訊息</div>
       <div style="font-size:11px;color:var(--text-dim);margin-bottom:10px;line-height:1.5">
-        09:00~21:00 之間，距離上次互動超過設定的時間時，角色會主動傳訊息。主頁和聊天頁共用每日上限，一天最多 3 次。上次未回覆時暫停，直到你回覆才重新計時。
+        09:00~21:00 之間，距離上次互動超過設定的時間時，角色會主動傳訊息。主頁和聊天頁共用每日上限。上次未回覆時暫停，直到你回覆才重新計時。
       </div>
       <label style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);margin-bottom:8px">
         <span style="font-size:13px;font-weight:600">間隔多久觸發（小時）</span>
         <input type="number" id="pg-proactive-hours" min="0.5" max="24" step="0.5" style="width:64px;text-align:center;padding:4px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:inherit">
+      </label>
+      <label style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);margin-bottom:8px">
+        <span style="font-size:13px;font-weight:600">每天最多幾次</span>
+        <input type="number" id="pg-proactive-max-daily" min="1" max="20" step="1" style="width:64px;text-align:center;padding:4px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:inherit">
       </label>
       <div style="font-size:11px;margin-bottom:8px;padding:8px;border-radius:8px;background:var(--surface2)">
         通知權限狀態：<span id="notif-perm-status" style="font-weight:600">檢查中…</span>
@@ -1030,7 +1034,7 @@ let fitInject = false, fitData = { steps: [], sleep: [], weight: [] }, fitSnapsh
 let locInject = false, usageInject = false;
 let proactiveConvIds = [], proactiveState = { lastCheckDate: '', dailyCounts: {} }, proactiveTimer = null;
 let notifications = [], notifEnabled = false, notifLeadMin = 10, notifCheckTimer = null, notifiedIds = new Set();
-let instTextMsg = '', msgHistory = [], msgArchives = [], msgPendingFiles = [], proactiveMsgEnabled = false, msgModel = 'claude-sonnet-4-6', proactiveHours = 3;
+let instTextMsg = '', msgHistory = [], msgArchives = [], msgPendingFiles = [], proactiveMsgEnabled = false, msgModel = 'claude-sonnet-4-6', proactiveHours = 3, proactiveMaxDaily = 3;
 const NOTIF_VIEW_ID = '__notifications__';
 
 const COMPRESS_THRESHOLD = 50;
@@ -1130,6 +1134,7 @@ async function loadState() {
       msgArchives = Array.isArray(s.msgArchives) ? s.msgArchives : [];
       proactiveMsgEnabled = !!s.proactiveMsgEnabled;
       proactiveHours = (typeof s.proactiveHours === 'number' && s.proactiveHours > 0) ? s.proactiveHours : 3;
+      proactiveMaxDaily = (typeof s.proactiveMaxDaily === 'number' && s.proactiveMaxDaily > 0) ? s.proactiveMaxDaily : 3;
       msgModel = s.msgModel || 'claude-sonnet-4-6';
       applyDarkMode();
       conversations = s.conversations || [];
@@ -1201,7 +1206,7 @@ async function save() {
       fitInject, fitData, fitSnapshotTime, fitTrendLastSentDate, proactiveConvIds, proactiveState,
       locInject, usageInject,
       notifications, notifEnabled, notifLeadMin, notifiedIds: Array.from(notifiedIds),
-      instTextMsg, msgHistory, msgArchives, proactiveMsgEnabled, msgModel, proactiveHours,
+      instTextMsg, msgHistory, msgArchives, proactiveMsgEnabled, msgModel, proactiveHours, proactiveMaxDaily,
       conversations, currentConvId,
       model: document.getElementById('chat-model').value
     };
@@ -1996,12 +2001,12 @@ async function checkProactive() {
     proactiveState.lastCheckDate = todayKey;
   }
 
-  // 一天最多 3 次
-  if (proactiveState.dailyCount >= 3) return;
+  // 一天最多幾次（可在設定調整）
+  if (proactiveState.dailyCount >= proactiveMaxDaily) return;
 
   // ── 主頁對話檢查 ──
   for (const convId of proactiveConvIds) {
-    if (proactiveState.dailyCount >= 3) break;
+    if (proactiveState.dailyCount >= proactiveMaxDaily) break;
     const conv = conversations.find(c => c.id === convId);
     if (!conv || !conv.history.length) continue;
     // 上次是 proactive 且未回覆 → 暫停
@@ -2021,7 +2026,7 @@ async function checkProactive() {
   }
 
   // ── 對話頁檢查 ──
-  if (proactiveState.dailyCount >= 3) return;
+  if (proactiveState.dailyCount >= proactiveMaxDaily) return;
   if (proactiveMsgEnabled) {
     // 上次是 proactive 且未回覆 → 暫停
     const last = msgHistory[msgHistory.length - 1];
@@ -3072,6 +3077,7 @@ function fillSettingsPage() {
   // 對話頁主動訊息綁定會在下面
 document.getElementById('pg-proactive-msg').checked = proactiveMsgEnabled;
   document.getElementById('pg-proactive-hours').value = proactiveHours;
+  document.getElementById('pg-proactive-max-daily').value = proactiveMaxDaily;
   renderProactiveList();
   document.getElementById('pg-claude-key').value = apiKey || '';
   document.getElementById('pg-ds-key').value = dsKey || '';
@@ -3155,6 +3161,12 @@ document.getElementById('pg-proactive-hours').addEventListener('change', e=>{
   const v = parseFloat(e.target.value);
   proactiveHours = (!isNaN(v) && v > 0) ? v : 3;
   e.target.value = proactiveHours;
+  save();
+});
+document.getElementById('pg-proactive-max-daily').addEventListener('change', e=>{
+  const v = parseInt(e.target.value, 10);
+  proactiveMaxDaily = (!isNaN(v) && v > 0) ? v : 3;
+  e.target.value = proactiveMaxDaily;
   save();
 });
 updateNotifPermStatus();
