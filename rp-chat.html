@@ -1001,7 +1001,9 @@ async function showNotif(title, body, icon) {
 }
 
 // ── Periodic Background Sync：讓 app 沒開時也能自己醒來檢查主動訊息 ──
+// （這段是 PWA/Chrome 版本專用；原生殼那邊用的是 WorkManager，不會走這裡，另外在 updateBgSyncStatus 判斷）
 async function registerBgSync() {
+  if (window.AndroidBridge) return; // 原生殼不需要 Chrome 的 periodicSync
   const el = document.getElementById('bgsync-status');
   const setStatus = (text, color) => { if (el) { el.textContent = text; el.style.color = color; } };
   if (!('serviceWorker' in navigator) || !('periodicSync' in (window.ServiceWorkerRegistration ? ServiceWorkerRegistration.prototype : {}))) {
@@ -1021,6 +1023,14 @@ async function registerBgSync() {
     console.error('背景喚醒註冊失敗', e);
     setStatus('註冊失敗：' + (e.message || e), '#c0392b');
   }
+}
+
+// 在原生殼裡顯示的背景喚醒狀態（WorkManager 版本），跟上面 Chrome 版本分開
+function updateBgSyncStatusNative() {
+  const el = document.getElementById('bgsync-status');
+  if (!el || !window.AndroidBridge) return;
+  el.textContent = '原生排程已啟用 ✓（實際喚醒間隔由系統決定，不保證準時）';
+  el.style.color = '#2e7d32';
 }
 
 let apiKey = '', dsKey = '', oaiKey = '', charName = '', avatarB64 = '', docs = [], instText = '';
@@ -2322,6 +2332,12 @@ function stopNotifTimer() {
 }
 
 function requestNotifPermission() {
+  if (window.AndroidBridge && window.AndroidBridge.hasNotificationPermission) {
+    if (!window.AndroidBridge.hasNotificationPermission() && window.AndroidBridge.requestNotificationPermission) {
+      window.AndroidBridge.requestNotificationPermission();
+    }
+    return;
+  }
   if ('Notification' in window && Notification.permission === 'default') {
     Notification.requestPermission().then(updateNotifPermStatus);
   }
@@ -2330,6 +2346,12 @@ function requestNotifPermission() {
 function updateNotifPermStatus() {
   const el = document.getElementById('notif-perm-status');
   if (!el) return;
+  if (window.AndroidBridge && window.AndroidBridge.hasNotificationPermission) {
+    const granted = window.AndroidBridge.hasNotificationPermission();
+    if (granted) { el.textContent = '已允許 ✓'; el.style.color = '#2e7d32'; }
+    else { el.textContent = '尚未允許（按下方按鈕測試會跳系統請求）'; el.style.color = '#c0392b'; }
+    return;
+  }
   if (!('Notification' in window)) { el.textContent = '此瀏覽器不支援'; el.style.color = '#c0392b'; return; }
   const p = Notification.permission;
   if (p === 'granted') { el.textContent = '已允許 ✓'; el.style.color = '#2e7d32'; }
@@ -3171,7 +3193,19 @@ document.getElementById('pg-proactive-max-daily').addEventListener('change', e=>
 });
 updateNotifPermStatus();
 registerBgSync();
+updateBgSyncStatusNative();
 document.getElementById('notif-test-btn').addEventListener('click', async ()=>{
+  if (window.AndroidBridge && window.AndroidBridge.testNotification) {
+    if (!window.AndroidBridge.hasNotificationPermission()) {
+      window.AndroidBridge.requestNotificationPermission?.();
+      alert('已請求通知權限，允許之後再按一次測試通知看看。');
+      return;
+    }
+    const ok = window.AndroidBridge.testNotification(charName || '測試', '如果你看到這則通知，代表通知功能正常運作 ✓');
+    if (!ok) alert('通知呼叫失敗，請把畫面截圖給 Claude 看。');
+    updateNotifPermStatus();
+    return;
+  }
   if (!('Notification' in window)) { alert('此瀏覽器不支援通知'); return; }
   if (Notification.permission === 'granted') {
     const ok = await showNotif(charName || '測試', '如果你看到這則通知，代表通知功能正常運作 ✓', avatarB64);
