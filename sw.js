@@ -279,7 +279,9 @@ async function runProactiveCheck() {
 
   const now = new Date();
   const hour = now.getHours();
-  if (hour < 9 || hour >= 21) return; // 只在 09:00~21:00
+  const startHour = (typeof s.proactiveStartHour === 'number') ? s.proactiveStartHour : 9;
+  const endHour = (typeof s.proactiveEndHour === 'number') ? s.proactiveEndHour : 21;
+  if (hour < startHour || hour >= endHour) return; // 只在設定的時間範圍內
 
   const todayKey = now.toISOString().slice(0, 10);
   const proactiveState = s.proactiveState || { lastCheckDate: '', dailyCount: 0, messagesEndTime: 0 };

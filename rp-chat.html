@@ -753,8 +753,16 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
     <div class="card" style="max-width:none">
       <div class="card-title">主動訊息</div>
       <div style="font-size:11px;color:var(--text-dim);margin-bottom:10px;line-height:1.5">
-        09:00~21:00 之間，距離上次互動超過設定的時間時，角色會主動傳訊息。主頁和聊天頁共用每日上限。上次未回覆時暫停，直到你回覆才重新計時。
+        在設定的時間範圍內，距離上次互動超過設定的時間時，角色會主動傳訊息。主頁和聊天頁共用每日上限。上次未回覆時暫停，直到你回覆才重新計時。
       </div>
+      <label style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);margin-bottom:8px">
+        <span style="font-size:13px;font-weight:600">觸發時間範圍（小時，24小時制）</span>
+        <span style="display:flex;align-items:center;gap:4px">
+          <input type="number" id="pg-proactive-start-hour" min="0" max="23" step="1" style="width:48px;text-align:center;padding:4px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:inherit">
+          <span>~</span>
+          <input type="number" id="pg-proactive-end-hour" min="0" max="24" step="1" style="width:48px;text-align:center;padding:4px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:inherit">
+        </span>
+      </label>
       <label style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);margin-bottom:8px">
         <span style="font-size:13px;font-weight:600">間隔多久觸發（小時）</span>
         <input type="number" id="pg-proactive-hours" min="0.5" max="24" step="0.5" style="width:64px;text-align:center;padding:4px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:inherit">
@@ -770,6 +778,11 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
       <div style="font-size:11px;margin-bottom:8px;padding:8px;border-radius:8px;background:var(--surface2);line-height:1.5">
         背景喚醒狀態：<span id="bgsync-status" style="font-weight:600">檢查中…</span><br>
         <span style="color:var(--text-dim)">（app 沒開時能不能自己醒來傳訊息，實際間隔由系統決定，不保證準時）</span>
+      </div>
+      <div id="pg-battery-row" style="display:none;font-size:11px;margin-bottom:8px;padding:8px;border-radius:8px;background:var(--surface2);line-height:1.5">
+        電池優化狀態：<span id="pg-battery-status" style="font-weight:600">檢查中…</span>
+        <button class="btn-sm" id="pg-battery-btn" style="margin-left:6px;padding:2px 8px;font-size:11px">排除電池優化</button><br>
+        <span style="color:var(--text-dim)">（OPPO 等系統對側載 App 背景執行限制很兇，這裡沒排除的話，主動訊息幾乎只會在你打開 App 當下補跑）</span>
       </div>
       <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:6px 0;border-bottom:1px solid var(--border);margin-bottom:8px">
         <span style="font-size:13px;font-weight:600">📩 聊天頁（訊息模式）</span>
@@ -1046,6 +1059,24 @@ function updateBgSyncStatusNative() {
   el.style.color = '#2e7d32';
 }
 
+// 電池優化排除狀態（只有原生殼有這個功能）
+function updateBatteryStatus() {
+  const row = document.getElementById('pg-battery-row');
+  const status = document.getElementById('pg-battery-status');
+  if (!row || !status) return;
+  if (!(window.AndroidBridge && window.AndroidBridge.isBatteryOptimizationIgnored)) {
+    row.style.display = 'none';
+    return;
+  }
+  row.style.display = '';
+  const ignored = window.AndroidBridge.isBatteryOptimizationIgnored();
+  status.textContent = ignored ? '已排除 ✓' : '尚未排除（建議排除）';
+  status.style.color = ignored ? '#2e7d32' : '#c0392b';
+}
+document.getElementById('pg-battery-btn')?.addEventListener('click', () => {
+  window.AndroidBridge?.requestIgnoreBatteryOptimization?.();
+});
+
 let apiKey = '', dsKey = '', oaiKey = '', charName = '', avatarB64 = '', docs = [], instText = '';
 let thinkingEnabled = false;
 let searchEnabled = false;
@@ -1057,7 +1088,7 @@ let fitInject = false, fitData = { steps: [], sleep: [], weight: [] }, fitSnapsh
 let locInject = false, usageInject = false;
 let proactiveConvIds = [], proactiveState = { lastCheckDate: '', dailyCounts: {} }, proactiveTimer = null;
 let notifications = [], notifEnabled = false, notifLeadMin = 10, notifCheckTimer = null, notifiedIds = new Set();
-let instTextMsg = '', msgHistory = [], msgArchives = [], msgPendingFiles = [], proactiveMsgEnabled = false, msgModel = 'claude-sonnet-4-6', proactiveHours = 3, proactiveMaxDaily = 3;
+let instTextMsg = '', msgHistory = [], msgArchives = [], msgPendingFiles = [], proactiveMsgEnabled = false, msgModel = 'claude-sonnet-4-6', proactiveHours = 3, proactiveMaxDaily = 3, proactiveStartHour = 9, proactiveEndHour = 21;
 const NOTIF_VIEW_ID = '__notifications__';
 
 const COMPRESS_THRESHOLD = 80;
@@ -1159,6 +1190,8 @@ async function loadState() {
       proactiveMsgEnabled = !!s.proactiveMsgEnabled;
       proactiveHours = (typeof s.proactiveHours === 'number' && s.proactiveHours > 0) ? s.proactiveHours : 3;
       proactiveMaxDaily = (typeof s.proactiveMaxDaily === 'number' && s.proactiveMaxDaily > 0) ? s.proactiveMaxDaily : 3;
+      proactiveStartHour = (typeof s.proactiveStartHour === 'number') ? s.proactiveStartHour : 9;
+      proactiveEndHour = (typeof s.proactiveEndHour === 'number') ? s.proactiveEndHour : 21;
       msgModel = s.msgModel || 'claude-sonnet-4-6';
       applyDarkMode();
       conversations = s.conversations || [];
@@ -1277,7 +1310,7 @@ async function save() {
       fitInject, fitData, fitSnapshotTime, fitTrendLastSentDate, proactiveConvIds, proactiveState,
       locInject, usageInject,
       notifications, notifEnabled, notifLeadMin, notifiedIds: Array.from(notifiedIds),
-      instTextMsg, msgHistory, msgArchives, proactiveMsgEnabled, msgModel, proactiveHours, proactiveMaxDaily,
+      instTextMsg, msgHistory, msgArchives, proactiveMsgEnabled, msgModel, proactiveHours, proactiveMaxDaily, proactiveStartHour, proactiveEndHour,
       conversations, currentConvId,
       model: document.getElementById('chat-model').value
     };
@@ -2105,7 +2138,7 @@ function renderProactiveList() {
 async function checkProactive() {
   const now = new Date();
   const hour = now.getHours();
-  if (hour < 9 || hour >= 21) return; // 只在 09:00~21:00
+  if (hour < proactiveStartHour || hour >= proactiveEndHour) return; // 只在設定的時間範圍內
   const todayKey = now.toISOString().slice(0, 10);
 
   // 每日重置計數（主頁+對話共用同一個計數）
@@ -3198,6 +3231,7 @@ function fillSettingsPage() {
   document.getElementById('pg-gcal-web-row').style.display = isNative ? 'none' : '';
   document.getElementById('pg-gcal-android-row').style.display = isNative ? '' : 'none';
   if (isNative) updateGcalAndroidStatus();
+  updateBatteryStatus();
   document.getElementById('pg-gcal-inject').checked = gcalInject;
   document.getElementById('pg-gcal-disconnect').style.display = gcalToken ? 'block' : 'none';
   document.getElementById('pg-notif-toggle').checked = notifEnabled;
@@ -3207,6 +3241,8 @@ function fillSettingsPage() {
   updateUsageAccessRow();
   // 對話頁主動訊息綁定會在下面
 document.getElementById('pg-proactive-msg').checked = proactiveMsgEnabled;
+  document.getElementById('pg-proactive-start-hour').value = proactiveStartHour;
+  document.getElementById('pg-proactive-end-hour').value = proactiveEndHour;
   document.getElementById('pg-proactive-hours').value = proactiveHours;
   document.getElementById('pg-proactive-max-daily').value = proactiveMaxDaily;
   renderProactiveList();
@@ -3300,6 +3336,18 @@ document.getElementById('pg-proactive-msg').addEventListener('change', e=>{
   save();
   if (proactiveMsgEnabled) { requestNotifPermission(); registerBgSync(); }
 });
+document.getElementById('pg-proactive-start-hour').addEventListener('change', e=>{
+  const v = parseInt(e.target.value, 10);
+  proactiveStartHour = (!isNaN(v) && v >= 0 && v <= 23) ? v : 9;
+  e.target.value = proactiveStartHour;
+  save();
+});
+document.getElementById('pg-proactive-end-hour').addEventListener('change', e=>{
+  const v = parseInt(e.target.value, 10);
+  proactiveEndHour = (!isNaN(v) && v >= 1 && v <= 24) ? v : 21;
+  e.target.value = proactiveEndHour;
+  save();
+});
 document.getElementById('pg-proactive-hours').addEventListener('change', e=>{
   const v = parseFloat(e.target.value);
   proactiveHours = (!isNaN(v) && v > 0) ? v : 3;
@@ -3315,6 +3363,7 @@ document.getElementById('pg-proactive-max-daily').addEventListener('change', e=>
 updateNotifPermStatus();
 registerBgSync();
 updateBgSyncStatusNative();
+updateBatteryStatus();
 document.getElementById('notif-test-btn').addEventListener('click', async ()=>{
   if (window.AndroidBridge && window.AndroidBridge.testNotification) {
     if (!window.AndroidBridge.hasNotificationPermission()) {
