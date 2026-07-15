@@ -779,6 +779,7 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
         背景喚醒狀態：<span id="bgsync-status" style="font-weight:600">檢查中…</span><br>
         <span style="color:var(--text-dim)">（app 沒開時能不能自己醒來傳訊息，實際間隔由系統決定，不保證準時）</span><br>
         <span id="bg-last-run" style="color:var(--text-dim)"></span>
+        <div id="bg-last-diag" style="margin-top:6px;white-space:pre-line;color:var(--text-dim);border-top:1px solid var(--border);padding-top:6px"></div>
       </div>
       <div id="pg-battery-row" style="display:none;font-size:11px;margin-bottom:8px;padding:8px;border-radius:8px;background:var(--surface2);line-height:1.5">
         電池優化狀態：<span id="pg-battery-status" style="font-weight:600">檢查中…</span>
@@ -1064,12 +1065,17 @@ function updateBgSyncStatusNative() {
 // 顯示背景任務「上次真的被系統喚醒執行」的時間，用來診斷排程到底有沒有真的在跑
 function updateLastBgRun() {
   const el = document.getElementById('bg-last-run');
+  const diagEl = document.getElementById('bg-last-diag');
   if (!el || !(window.AndroidBridge && window.AndroidBridge.getLastBackgroundCheckTime)) return;
   const ts = window.AndroidBridge.getLastBackgroundCheckTime();
   if (!ts) { el.textContent = '上次背景執行：從來沒有（可能還沒被系統喚醒過）'; return; }
   const diffMin = Math.round((Date.now() - ts) / 60000);
   const timeStr = new Date(ts).toLocaleString('zh-TW', {hour:'2-digit', minute:'2-digit', month:'numeric', day:'numeric'});
   el.textContent = `上次背景執行：${timeStr}（約 ${diffMin} 分鐘前）`;
+  if (diagEl && window.AndroidBridge.getLastBackgroundCheckDiag) {
+    const diag = window.AndroidBridge.getLastBackgroundCheckDiag();
+    diagEl.textContent = diag ? ('判斷過程：\n' + diag) : '';
+  }
 }
 
 // 電池優化排除狀態（只有原生殼有這個功能）
