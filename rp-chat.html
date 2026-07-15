@@ -1252,6 +1252,26 @@ async function loadState() {
 }
 loadState();
 
+// 原生殼點擊主動訊息的系統通知後，會呼叫這個函式，帶你直接跳到對應的對話。
+// scope: 'chat' 代表聊天頁（訊息模式）；'conv' 代表主頁的某個對話（convId 指定是哪一個）。
+window.navigateToProactive = function(scope, convId) {
+  if (scope === 'chat') {
+    switchPage('messages');
+  } else if (scope === 'conv') {
+    switchPage('home');
+    if (convId) {
+      if (conversations.some(c => c.id === convId)) {
+        switchConv(convId);
+      } else {
+        // 資料可能還沒載完（例如通知把 App 從冷啟動叫起來），稍等一下再試一次
+        setTimeout(() => {
+          if (conversations.some(c => c.id === convId)) switchConv(convId);
+        }, 800);
+      }
+    }
+  }
+};
+
 // ── 輸入框草稿：避免 App 重新整理（切背景回來、選檔案回來、Google 授權回來這些都會觸發）
 // 把打到一半、還沒送出的文字清掉。每次打字就存一份到 localStorage，重整後自動還原。
 (function setupDraftPersistence() {
