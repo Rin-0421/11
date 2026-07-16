@@ -1365,26 +1365,49 @@ async function save() {
 // 從原生殼接手「背景已經產生、但畫面上還沒有」的主動訊息，接進真正的對話紀錄裡。
 // 只在有 AndroidBridge（也就是真的跑在原生殼裡）時才有作用，一般瀏覽器/PWA 開啟時完全不受影響。
 async function syncPendingProactiveFromNative() {
-  if (!(window.AndroidBridge && window.AndroidBridge.getAndClearPendingProactive)) return;
+  if (!window.AndroidBridge) return;
+
+  // 先同步「今天已經發過幾次」：背景任務算的次數，只存在原生端自己的快取裡，
+  // 不同步的話前景會誤以為今天都還沒發過，導致超過每日上限。
+  if (window.AndroidBridge.getNativeProactiveState) {
+    try {
+      const nativeState = JSON.parse(window.AndroidBridge.getNativeProactiveState() || '{}');
+      const todayKey = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' });
+      if (nativeState.lastCheckDate === todayKey) {
+        if (proactiveState.lastCheckDate !== todayKey) {
+          // 前景這邊還停留在昨天的資料，原生端的當天次數直接採用
+          proactiveState.dailyCount = nativeState.dailyCount || 0;
+          proactiveState.lastCheckDate = todayKey;
+        } else {
+          // 兩邊都是今天的資料，取較大值，確保不會把已經發過的次數蓋回較小的數字
+          proactiveState.dailyCount = Math.max(proactiveState.dailyCount || 0, nativeState.dailyCount || 0);
+        }
+      }
+    } catch(e) {}
+  }
+
+  if (!window.AndroidBridge.getAndClearPendingProactive) return;
   let pending;
   try { pending = JSON.parse(window.AndroidBridge.getAndClearPendingProactive() || '[]'); } catch(e) { return; }
-  if (!Array.isArray(pending) || !pending.length) return;
   let changed = false;
-  pending.forEach(item => {
-    if (item.scope === 'conv' && item.convId && item.msg) {
-      const conv = conversations.find(c => c.id === item.convId);
-      if (conv) {
-        conv.history.push(item.msg);
-        if (item.fitTrendDate) conv.fitTrendDate = item.fitTrendDate;
+  if (Array.isArray(pending) && pending.length) {
+    pending.forEach(item => {
+      if (item.scope === 'conv' && item.convId && item.msg) {
+        const conv = conversations.find(c => c.id === item.convId);
+        if (conv) {
+          conv.history.push(item.msg);
+          if (item.fitTrendDate) conv.fitTrendDate = item.fitTrendDate;
+          changed = true;
+        }
+      } else if (item.scope === 'chat' && item.msg) {
+        msgHistory.push(item.msg);
+        if (item.fitTrendDate) fitTrendLastSentDate = item.fitTrendDate;
         changed = true;
       }
-    } else if (item.scope === 'chat' && item.msg) {
-      msgHistory.push(item.msg);
-      if (item.fitTrendDate) fitTrendLastSentDate = item.fitTrendDate;
-      changed = true;
-    }
-  });
-  if (changed) { save(); renderConvList(); renderMessages(); if (typeof renderMsgPage === 'function') renderMsgPage(); }
+    });
+  }
+  save(); // 不管有沒有新訊息，次數同步這件事本身就值得存檔
+  if (changed) { renderConvList(); renderMessages(); if (typeof renderMsgPage === 'function') renderMsgPage(); }
 }
 
 // ── Avatar ──
@@ -2178,7 +2201,7 @@ async function checkProactive() {
   const now = new Date();
   const hour = now.getHours();
   if (hour < proactiveStartHour || hour >= proactiveEndHour) return; // 只在設定的時間範圍內
-  const todayKey = now.toISOString().slice(0, 10);
+  const todayKey = now.toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' }); // en-CA 格式剛好是 yyyy-MM-dd
 
   // 每日重置計數（主頁+對話共用同一個計數）
   if (proactiveState.lastCheckDate !== todayKey) {
