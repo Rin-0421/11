@@ -569,8 +569,8 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
       <select class="hdr-select" id="chat-model">
         <optgroup label="Claude">
           <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
-          <option value="claude-sonnet-5">Sonnet 5</option>
           <option value="claude-sonnet-4-6" selected>Sonnet 4.6</option>
+          <option value="claude-opus-4-6">Opus 4.6</option>
           <option value="claude-opus-4-7">Opus 4.7</option>
         </optgroup>
         <optgroup label="DeepSeek">
@@ -612,8 +612,8 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
       <select class="hdr-select" id="msg-model-select">
         <optgroup label="Claude">
           <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
-          <option value="claude-sonnet-5">Sonnet 5</option>
           <option value="claude-sonnet-4-6" selected>Sonnet 4.6</option>
+          <option value="claude-opus-4-6">Opus 4.6</option>
           <option value="claude-opus-4-7">Opus 4.7</option>
         </optgroup>
         <optgroup label="DeepSeek">
@@ -2314,7 +2314,6 @@ async function generateProactive(conv) {
       // Claude：明確關閉思考；system + 歷史都做快取，並提供健康工具
       const claudeMessages = addHistoryCacheBreakpoint(apiMessages);
       body = { model, max_tokens: 2000 };
-      if (model === 'claude-sonnet-5') body.thinking = { type:'disabled' }; // s5 預設思考全開，主動訊息這種背景任務明確關閉省錢
       if (sys) body.system = [{ type:'text', text:sys, cache_control:{ type:'ephemeral' } }];
       const _tools = getHealthTools();
       if (_tools.length) body.tools = _tools;
@@ -2797,8 +2796,7 @@ async function regenerateAssistantMsg() {
       claudeMessages = addHistoryCacheBreakpoint(apiMessages);
       body = { model, max_tokens: thinkingEnabled ? 16000 : 2048, stream: true };
       if (sys) body.system = [{ type:'text', text:sys, cache_control:{ type:'ephemeral' } }];
-      if (thinkingEnabled) body.thinking = (model==='claude-opus-4-7'||model==='claude-sonnet-5') ? { type:'adaptive' } : { type:'enabled', budget_tokens:10000 };
-      else if (model==='claude-sonnet-5') body.thinking = { type:'disabled' }; // s5 預設 adaptive thinking 全開，沒開思考開關時明確關閉，避免多花錢
+      if (thinkingEnabled) body.thinking = (model==='claude-opus-4-7') ? { type:'adaptive' } : { type:'enabled', budget_tokens:10000 };
       const _tools = getHealthTools();
       if (_tools.length) body.tools = _tools;
       headers = { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true', 'anthropic-beta': 'interleaved-thinking-2025-05-14' };
@@ -3005,8 +3003,7 @@ async function sendMsg() {
       claudeMessages = addHistoryCacheBreakpoint(apiMessages);
       body = { model, max_tokens: thinkingEnabled ? 16000 : 2048, stream: true };
       if (sys) body.system = [{ type:'text', text:sys, cache_control:{ type:'ephemeral' } }];
-      if (thinkingEnabled) body.thinking = (model==='claude-opus-4-7'||model==='claude-sonnet-5') ? { type:'adaptive' } : { type:'enabled', budget_tokens:10000 };
-      else if (model==='claude-sonnet-5') body.thinking = { type:'disabled' }; // s5 預設 adaptive thinking 全開，沒開思考開關時明確關閉，避免多花錢
+      if (thinkingEnabled) body.thinking = (model==='claude-opus-4-7') ? { type:'adaptive' } : { type:'enabled', budget_tokens:10000 };
       const _tools = getHealthTools();
       if (_tools.length) body.tools = _tools;
       headers = { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true', 'anthropic-beta': 'interleaved-thinking-2025-05-14' };
@@ -3934,8 +3931,7 @@ async function send() {
       claudeMessages = addHistoryCacheBreakpoint(apiMessages);
       body = { model, max_tokens: thinkingEnabled?16000:2048, stream: true };
       if (sys) body.system = [{ type:'text', text:sys, cache_control:{ type:'ephemeral' } }];
-      if (thinkingEnabled) body.thinking = (model==='claude-opus-4-7'||model==='claude-sonnet-5') ? { type:'adaptive' } : { type:'enabled', budget_tokens:10000 };
-      else if (model==='claude-sonnet-5') body.thinking = { type:'disabled' }; // s5 預設 adaptive thinking 全開，沒開思考開關時明確關閉，避免多花錢
+      if (thinkingEnabled) body.thinking = (model==='claude-opus-4-7') ? { type:'adaptive' } : { type:'enabled', budget_tokens:10000 };
       const _tools = [...(searchEnabled ? [{ type:'web_search_20250305', name:'web_search' }] : []), ...getHealthTools()];
       if (_tools.length) body.tools = _tools;
       headers = { 'Content-Type':'application/json', 'x-api-key':key, 'anthropic-version':'2023-06-01', 'anthropic-dangerous-direct-browser-access':'true', 'anthropic-beta':'interleaved-thinking-2025-05-14' };
@@ -4176,8 +4172,7 @@ async function regenerateFrom(historyIdx) {
       claudeMessages = addHistoryCacheBreakpoint(apiMessages);
       body={model,max_tokens:thinkingEnabled?16000:2048,stream:true};
       if (sys) body.system=[{type:'text',text:sys,cache_control:{type:'ephemeral'}}];
-      if (thinkingEnabled) body.thinking=(model==='claude-opus-4-7'||model==='claude-sonnet-5')?{type:'adaptive'}:{type:'enabled',budget_tokens:10000};
-      else if (model==='claude-sonnet-5') body.thinking={type:'disabled'};
+      if (thinkingEnabled) body.thinking=(model==='claude-opus-4-7')?{type:'adaptive'}:{type:'enabled',budget_tokens:10000};
       const _tools=[...(searchEnabled?[{type:'web_search_20250305',name:'web_search'}]:[]),...getHealthTools()];
       if (_tools.length) body.tools=_tools;
       headers={'Content-Type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true','anthropic-beta':'interleaved-thinking-2025-05-14'};
