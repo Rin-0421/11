@@ -1245,8 +1245,10 @@ async function loadState() {
     renderConvList();
     renderMessages();
     if (notifEnabled) startNotifTimer();
-    startProactiveTimer();
+    // 一定要先同步背景已經產生的訊息/次數，前景的 startProactiveTimer() 一啟動會立刻檢查一次，
+    // 如果順序反過來，前景會在不知道背景剛發過訊息的情況下，誤判「還沒發過」又重複觸發一次。
     await syncPendingProactiveFromNative();
+    startProactiveTimer();
     // 如果原生殼之前已經連過 Google，開啟 App 時自動靜默續期一次 token 並刷新行事曆，
     // 不用使用者每次都手動按連接／重新整理（Play 服務本身會記住授權，這裡只是主動去問一次）。
     if (window.AndroidBridge && window.AndroidBridge.isGoogleConnected && window.AndroidBridge.isGoogleConnected()) {
