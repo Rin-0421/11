@@ -746,6 +746,16 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
       <textarea class="ftextarea" id="pg-inst" style="min-height:96px" placeholder="給 AI 的行為規則（RP 對戲模式）…"></textarea>
     </div>
     <div class="card" style="max-width:none">
+      <div class="card-title">對話壓縮</div>
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:8px;line-height:1.5">
+        只影響主頁對話（聊天頁是另一套獨立機制）。累積到下面這個則數時，會自動把最前面的訊息壓縮成摘要，永遠保留最新 10 則完整紀錄。
+      </div>
+      <label style="display:flex;align-items:center;justify-content:space-between">
+        <span style="font-size:13px;font-weight:600">累積幾則觸發壓縮</span>
+        <input type="number" id="pg-compress-threshold" min="11" max="500" step="1" style="width:64px;text-align:center;padding:4px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:inherit">
+      </label>
+    </div>
+    <div class="card" style="max-width:none">
       <div class="card-title">聊天指令</div>
       <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px">用於「聊天」的訊息模式</div>
       <textarea class="ftextarea" id="pg-inst-msg" style="min-height:96px" placeholder="給 AI 的行為規則（訊息模式）…"></textarea>
@@ -1110,8 +1120,8 @@ let notifications = [], notifEnabled = false, notifLeadMin = 10, notifCheckTimer
 let instTextMsg = '', msgHistory = [], msgArchives = [], msgPendingFiles = [], proactiveMsgEnabled = false, msgModel = 'claude-sonnet-4-6', proactiveHours = 3, proactiveMaxDaily = 3, proactiveStartHour = 9, proactiveEndHour = 21;
 const NOTIF_VIEW_ID = '__notifications__';
 
-const COMPRESS_THRESHOLD = 80;
-const KEEP_RECENT = 10;
+let compressThreshold = 80; // 累積到幾則觸發壓縮，可在設定調整
+const KEEP_RECENT = 10; // 保留最新幾則不壓縮，固定不變
 
 // ── Helpers ──
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2); }
@@ -1211,6 +1221,7 @@ async function loadState() {
       proactiveMaxDaily = (typeof s.proactiveMaxDaily === 'number' && s.proactiveMaxDaily > 0) ? s.proactiveMaxDaily : 3;
       proactiveStartHour = (typeof s.proactiveStartHour === 'number') ? s.proactiveStartHour : 9;
       proactiveEndHour = (typeof s.proactiveEndHour === 'number') ? s.proactiveEndHour : 21;
+      compressThreshold = (typeof s.compressThreshold === 'number' && s.compressThreshold > KEEP_RECENT) ? s.compressThreshold : 80;
       msgModel = s.msgModel || 'claude-sonnet-4-6';
       applyDarkMode();
       conversations = s.conversations || [];
@@ -1349,7 +1360,7 @@ async function save() {
       fitInject, fitData, fitSnapshotTime, fitTrendLastSentDate, proactiveConvIds, proactiveState,
       locInject, usageInject,
       notifications, notifEnabled, notifLeadMin, notifiedIds: Array.from(notifiedIds),
-      instTextMsg, msgHistory, msgArchives, proactiveMsgEnabled, msgModel, proactiveHours, proactiveMaxDaily, proactiveStartHour, proactiveEndHour,
+      instTextMsg, msgHistory, msgArchives, proactiveMsgEnabled, msgModel, proactiveHours, proactiveMaxDaily, proactiveStartHour, proactiveEndHour, compressThreshold,
       conversations, currentConvId,
       model: document.getElementById('chat-model').value
     };
@@ -3304,6 +3315,7 @@ document.getElementById('pg-proactive-msg').checked = proactiveMsgEnabled;
   document.getElementById('pg-proactive-start-hour').value = proactiveStartHour;
   document.getElementById('pg-proactive-end-hour').value = proactiveEndHour;
   document.getElementById('pg-proactive-hours').value = proactiveHours;
+  document.getElementById('pg-compress-threshold').value = compressThreshold;
   document.getElementById('pg-proactive-max-daily').value = proactiveMaxDaily;
   renderProactiveList();
   document.getElementById('pg-claude-key').value = apiKey || '';
@@ -3412,6 +3424,12 @@ document.getElementById('pg-proactive-hours').addEventListener('change', e=>{
   const v = parseFloat(e.target.value);
   proactiveHours = (!isNaN(v) && v > 0) ? v : 3;
   e.target.value = proactiveHours;
+  save();
+});
+document.getElementById('pg-compress-threshold').addEventListener('change', e=>{
+  const v = parseInt(e.target.value, 10);
+  compressThreshold = (!isNaN(v) && v > KEEP_RECENT) ? v : 80;
+  e.target.value = compressThreshold;
   save();
 });
 document.getElementById('pg-proactive-max-daily').addEventListener('change', e=>{
@@ -3679,7 +3697,7 @@ async function maybeCompress() {
   const conv = currentConv();
   if (!conv) return;
   const real = conv.history.filter(m=>!m._notice);
-  if (real.length < COMPRESS_THRESHOLD) return;
+  if (real.length < compressThreshold) return;
   const toCompress = real.slice(0, real.length-KEEP_RECENT);
   const toKeep = real.slice(real.length-KEEP_RECENT);
   const summaryHistory = toCompress.map(m => ({
