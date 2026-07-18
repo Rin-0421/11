@@ -2005,6 +2005,28 @@ function getHealthTools() {
 }
 
 // 同一組工具的 OpenAI/DeepSeek（function calling）格式版本
+// 用便宜的 gpt-4o-mini-search-preview 先查一次網路，把查到的內容整理成文字，
+// 讓後面真正負責角色扮演的模型（例如 GPT-4.1）拿去當參考資料用。
+// 這是繞開「一般 GPT 模型在 Chat Completions API 上根本不支援 web_search_preview 工具」
+// 這個限制的做法——OpenAI 只開放特定的搜尋專用模型才能真的搜尋。
+async function fetchGptWebSearchContext(query, oaiKey) {
+  if (!oaiKey || !query) return null;
+  try {
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${oaiKey}` },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini-search-preview',
+        web_search_options: {},
+        messages: [{ role: 'user', content: query }]
+      })
+    });
+    if (!res.ok) { console.error('web search 查詢失敗', res.status, await res.text()); return null; }
+    const d = await res.json();
+    return d.choices?.[0]?.message?.content || null;
+  } catch(e) { console.error('web search 例外', e); return null; }
+}
+
 function getHealthToolsOpenAI() {
   const tools = [];
   if (fitInject) {
@@ -3924,6 +3946,14 @@ async function send() {
 
     let body, headers, url, claudeMessages, oaiMessages;
 
+    // GPT 在 Chat Completions API 上不支援 web_search_preview 這個工具（那是 Responses API 才有的），
+    // 改成先用便宜的搜尋專用模型查一次，把結果當參考資料塞進 system，再讓真正的角色扮演模型作答。
+    let _sys = sys;
+    if (useOAI && searchEnabled) {
+      const _searchResult = await fetchGptWebSearchContext(text || '（使用者剛傳了附件，沒有文字內容）', key);
+      if (_searchResult) _sys = (_sys ? _sys + '\n\n' : '') + '[網路搜尋結果，僅供參考，不要照抄]\n' + _searchResult + '\n[搜尋結果結束]';
+    }
+
     if (useDS || useOAI) {
       // DeepSeek / OpenAI 用 OpenAI 相容格式
       oaiMessages = apiMessages.map(m => {
@@ -3940,9 +3970,9 @@ async function send() {
         }
         return { role, content: typeof m.content === 'string' ? m.content : '' };
       });
-      if (sys) oaiMessages.unshift({ role: 'system', content: sys });
+      if (_sys) oaiMessages.unshift({ role: 'system', content: _sys });
       body = { model, max_tokens: 2048, stream: true };
-      const _oaiTools = [...(useOAI && searchEnabled ? [{ type: 'web_search_preview' }] : []), ...getHealthToolsOpenAI()];
+      const _oaiTools = getHealthToolsOpenAI();
       if (_oaiTools.length) body.tools = _oaiTools;
       headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
       url = useDS ? 'https://api.deepseek.com/chat/completions' : 'https://api.openai.com/v1/chat/completions';
@@ -4170,6 +4200,17 @@ async function regenerateFrom(historyIdx) {
     }
 
     let body, headers, url, claudeMessages, oaiMessages;
+
+    // 跟 send() 一樣：GPT 在 Chat Completions API 上不支援 web_search_preview，改成先查、再回覆
+    let _sys = sys;
+    if (useOAI && searchEnabled) {
+      const _lastUserMsg = [...apiMessages].reverse().find(m => m.role === 'user');
+      const _queryText = _lastUserMsg ? (typeof _lastUserMsg.content === 'string' ? _lastUserMsg.content
+        : Array.isArray(_lastUserMsg.content) ? _lastUserMsg.content.filter(b=>b.type==='text').map(b=>b.text).join('') : '') : '';
+      const _searchResult = await fetchGptWebSearchContext(_queryText, key);
+      if (_searchResult) _sys = (_sys ? _sys + '\n\n' : '') + '[網路搜尋結果，僅供參考，不要照抄]\n' + _searchResult + '\n[搜尋結果結束]';
+    }
+
     if (useDS || useOAI) {
       oaiMessages=apiMessages.map(m=>{
         if (Array.isArray(m.content)) {
@@ -4182,9 +4223,9 @@ async function regenerateFrom(historyIdx) {
         }
         return {role:m.role,content:typeof m.content==='string'?m.content:''};
       });
-      if (sys) oaiMessages.unshift({role:'system',content:sys});
+      if (_sys) oaiMessages.unshift({role:'system',content:_sys});
       body={model,max_tokens:2048,stream:true};
-      const _oaiTools=[...(useOAI && searchEnabled?[{type:'web_search_preview'}]:[]),...getHealthToolsOpenAI()];
+      const _oaiTools=getHealthToolsOpenAI();
       if (_oaiTools.length) body.tools=_oaiTools;
       headers={'Content-Type':'application/json','Authorization':`Bearer ${key}`};
       url=useDS?'https://api.deepseek.com/chat/completions':'https://api.openai.com/v1/chat/completions';
