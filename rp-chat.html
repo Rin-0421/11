@@ -1987,7 +1987,7 @@ function getHealthTools() {
       description: '查詢使用者手機「最近幾小時」各 App 的使用時長，可用來判斷使用者最近在做什麼、是否一直盯著手機。只有在原生 App 殼裡才查得到資料，一般瀏覽器/PWA 會查詢失敗。',
       input_schema: {
         type: 'object',
-        properties: { hours: { type: 'number', description: '要查詢最近幾小時的使用情況，預設 6 小時' } }
+        properties: { hours: { type: 'number', description: '要查詢最近幾小時的使用情況，預設 24 小時' } }
       }
     });
   }
@@ -2074,7 +2074,7 @@ function getHealthToolsOpenAI() {
         description: '查詢使用者手機「最近幾小時」各 App 的使用時長，可用來判斷使用者最近在做什麼、是否一直盯著手機。只有在原生 App 殼裡才查得到資料，一般瀏覽器/PWA 會查詢失敗。',
         parameters: {
           type: 'object',
-          properties: { hours: { type: 'number', description: '要查詢最近幾小時的使用情況，預設 6 小時' } }
+          properties: { hours: { type: 'number', description: '要查詢最近幾小時的使用情況，預設 24 小時' } }
         }
       }
     });
@@ -2160,7 +2160,7 @@ async function executeHealthTool(name, input) {
     if (!(window.AndroidBridge && window.AndroidBridge.getUsageStats)) {
       return '目前環境查不到使用情況（只有在原生 App 殼裡才支援這個功能）。';
     }
-    const hours = (typeof input.hours === 'number' && input.hours > 0) ? input.hours : 6;
+    const hours = (typeof input.hours === 'number' && input.hours > 0) ? input.hours : 24;
     if (!window.AndroidBridge.hasUsageAccess()) {
       return '使用者還沒授權「使用狀況存取權」，查不到資料。可以請使用者到手機設定裡開啟。';
     }
