@@ -1964,22 +1964,12 @@ function getHealthTools() {
     tools.push(
       {
         name: 'get_today_health',
-        description: '查詢使用者「今天」的步數與睡眠資料。',
+        description: '查詢使用者「今天」的步數、睡眠，以及最新一筆體重紀錄。',
         input_schema: { type: 'object', properties: {} }
       },
       {
         name: 'get_recent_health',
-        description: '查詢使用者「最近 5 天（含今天）」的步數與睡眠趨勢，可用來判斷最近作息、活動量的變化。',
-        input_schema: { type: 'object', properties: {} }
-      },
-      {
-        name: 'get_latest_weight',
-        description: '查詢使用者「最新一筆」體重紀錄（使用者手動輸入的資料）。',
-        input_schema: { type: 'object', properties: {} }
-      },
-      {
-        name: 'get_weight_history',
-        description: '查詢使用者「全部體重紀錄」（最多 5 筆，使用者手動輸入的資料），可用來判斷體重變化趨勢。',
+        description: '查詢使用者「最近 5 天（含今天）」的步數、睡眠趨勢，以及體重紀錄（最多 5 筆），可用來判斷最近作息、活動量、體重的變化。',
         input_schema: { type: 'object', properties: {} }
       }
     );
@@ -2052,7 +2042,7 @@ function getHealthToolsOpenAI() {
         type: 'function',
         function: {
           name: 'get_today_health',
-          description: '查詢使用者「今天」的步數與睡眠資料。',
+          description: '查詢使用者「今天」的步數、睡眠，以及最新一筆體重紀錄。',
           parameters: { type: 'object', properties: {} }
         }
       },
@@ -2060,23 +2050,7 @@ function getHealthToolsOpenAI() {
         type: 'function',
         function: {
           name: 'get_recent_health',
-          description: '查詢使用者「最近 5 天（含今天）」的步數與睡眠趨勢，可用來判斷最近作息、活動量的變化。',
-          parameters: { type: 'object', properties: {} }
-        }
-      },
-      {
-        type: 'function',
-        function: {
-          name: 'get_latest_weight',
-          description: '查詢使用者「最新一筆」體重紀錄（使用者手動輸入的資料）。',
-          parameters: { type: 'object', properties: {} }
-        }
-      },
-      {
-        type: 'function',
-        function: {
-          name: 'get_weight_history',
-          description: '查詢使用者「全部體重紀錄」（最多 5 筆，使用者手動輸入的資料），可用來判斷體重變化趨勢。',
+          description: '查詢使用者「最近 5 天（含今天）」的步數、睡眠趨勢，以及體重紀錄（最多 5 筆），可用來判斷最近作息、活動量、體重的變化。',
           parameters: { type: 'object', properties: {} }
         }
       }
@@ -2138,7 +2112,11 @@ async function executeHealthTool(name, input) {
       const h = Math.floor(todaySleep.durationMin / 60), m = todaySleep.durationMin % 60;
       parts.push(`昨晚睡眠：${todaySleep.startTime} → ${todaySleep.endTime}（${h}h${m}m）`);
     }
-    return parts.length ? parts.join('\n') : '目前沒有今天的步數/睡眠資料。';
+    if (fitData.weight && fitData.weight.length) {
+      const latest = fitData.weight[fitData.weight.length - 1];
+      parts.push(`最新體重紀錄（${latest.date}）：${latest.value} kg`);
+    }
+    return parts.length ? parts.join('\n') : '目前沒有今天的步數/睡眠/體重資料。';
   }
   if (name === 'get_recent_health') {
     const dayLabels = ['今天','昨天','前天','大前天'];
@@ -2158,16 +2136,10 @@ async function executeHealthTool(name, input) {
         return `${dayLabel(s.date)} ${h}h${m}m`;
       }).reverse().join('、'));
     }
-    return parts.length ? parts.join('\n') : '目前沒有最近幾天的步數/睡眠資料。';
-  }
-  if (name === 'get_latest_weight') {
-    if (!fitData.weight || !fitData.weight.length) return '使用者目前沒有輸入過體重紀錄。';
-    const latest = fitData.weight[fitData.weight.length - 1];
-    return `最新體重紀錄（${latest.date}）：${latest.value} kg`;
-  }
-  if (name === 'get_weight_history') {
-    if (!fitData.weight || !fitData.weight.length) return '使用者目前沒有輸入過體重紀錄。';
-    return '體重紀錄（由舊到新）：' + fitData.weight.map(w => `${w.date} ${w.value}kg`).join('、');
+    if (fitData.weight && fitData.weight.length) {
+      parts.push('體重紀錄（由舊到新，最多 5 筆）：' + fitData.weight.slice(-5).map(w => `${w.date} ${w.value}kg`).join('、'));
+    }
+    return parts.length ? parts.join('\n') : '目前沒有最近幾天的步數/睡眠/體重資料。';
   }
   if (name === 'get_location') {
     try {
