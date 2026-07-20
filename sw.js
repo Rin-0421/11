@@ -324,7 +324,7 @@ async function runProactiveCheck() {
     const contextParts = [`[當前台灣時間：${nowTW()}]`];
     if (gcalCtx) contextParts.push(gcalCtx);
     if (fit.text) contextParts.push(fit.text);
-    const userPrompt = `${contextParts.join('\n')}\n\n距離用戶上次互動已經超過設定的時間，請以角色身份主動傳一則簡短的訊息給用戶（建議簡短一點，關心、閒聊或分享皆可）。請以上面提供的時間、行程、健康資料為準，不要編造。`;
+    const userPrompt = `${contextParts.join('\n')}\n\n距離用戶上次互動已經超過設定的時間，請以角色身份主動傳一則訊息給用戶，內容需參考對話記錄以及現在時間。自行判斷是否調用健康/位置/手機使用時間等數據。請勿編造數據跟未發生的事。`;
 
     const apiMessages = toApiMessages(conv.history);
     apiMessages.push({ role: 'user', content: userPrompt });
@@ -369,8 +369,8 @@ async function runProactiveCheck() {
       if (gcalCtx) contextParts.push(gcalCtx);
       if (fit.text) contextParts.push(fit.text);
       const userPrompt = msgHistory.length
-        ? `${contextParts.join('\n')}\n\n距離用戶上次互動已經超過 3 小時，請以角色身份主動傳一則簡短的訊息給用戶（建議簡短一點，關心、閒聊或分享皆可）。請以上面提供的時間、行程、健康資料為準，不要編造。`
-        : `${contextParts.join('\n')}\n\n距離用戶上次對話已經超過 3 小時，這是一段全新的對話開頭，請以角色身份主動傳一則簡短的開場訊息給用戶。請以上面提供的時間、行程、健康資料為準，不要編造。`;
+        ? `${contextParts.join('\n')}\n\n距離用戶上次互動已經超過設定的時間，請以角色身份主動傳一則訊息給用戶，內容需參考對話記錄以及現在時間。自行判斷是否調用健康/位置/手機使用時間等數據。請勿編造數據跟未發生的事。`
+        : `${contextParts.join('\n')}\n\n距離用戶上次對話已經超過設定的時間，這是一段全新的對話開頭，請以角色身份主動傳一則開場訊息給用戶，需參考現在時間。自行判斷是否調用健康/位置/手機使用時間等數據。請勿編造數據跟未發生的事。`;
 
       const apiMessages = toApiMessages(msgHistory);
       apiMessages.push({ role: 'user', content: userPrompt });
