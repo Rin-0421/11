@@ -2836,6 +2836,8 @@ async function regenerateAssistantMsg() {
       if (thinkingEnabled) {
         if (model === 'claude-haiku-4-5-20251001') { body.thinking = { type:'enabled', budget_tokens:10000 }; }
         else { body.thinking = { type:'adaptive' }; body.effort = effortLevel; }
+      } else if (model !== 'claude-haiku-4-5-20251001') {
+        body.thinking = { type: 'disabled' };
       }
       const _tools = getHealthTools();
       if (_tools.length) body.tools = _tools;
@@ -3046,6 +3048,8 @@ async function sendMsg() {
       if (thinkingEnabled) {
         if (model === 'claude-haiku-4-5-20251001') { body.thinking = { type:'enabled', budget_tokens:10000 }; }
         else { body.thinking = { type:'adaptive' }; body.effort = effortLevel; }
+      } else if (model !== 'claude-haiku-4-5-20251001') {
+        body.thinking = { type: 'disabled' };
       }
       const _tools = getHealthTools();
       if (_tools.length) body.tools = _tools;
@@ -3987,6 +3991,8 @@ async function send() {
       if (thinkingEnabled) {
         if (model === 'claude-haiku-4-5-20251001') { body.thinking = { type:'enabled', budget_tokens:10000 }; }
         else { body.thinking = { type:'adaptive' }; body.effort = effortLevel; }
+      } else if (model !== 'claude-haiku-4-5-20251001') {
+        body.thinking = { type: 'disabled' };
       }
       const _tools = [...(searchEnabled ? [{ type:'web_search_20250305', name:'web_search' }] : []), ...getHealthTools()];
       if (_tools.length) body.tools = _tools;
@@ -4232,6 +4238,8 @@ async function regenerateFrom(historyIdx) {
       if (thinkingEnabled) {
         if (model === 'claude-haiku-4-5-20251001') { body.thinking={type:'enabled',budget_tokens:10000}; }
         else { body.thinking={type:'adaptive'}; body.effort=effortLevel; }
+      } else if (model !== 'claude-haiku-4-5-20251001') {
+        body.thinking={type:'disabled'};
       }
       const _tools=[...(searchEnabled?[{type:'web_search_20250305',name:'web_search'}]:[]),...getHealthTools()];
       if (_tools.length) body.tools=_tools;
