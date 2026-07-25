@@ -921,6 +921,12 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
       </div>
       <textarea class="ftextarea" id="set-new-doc-content" style="min-height:72px" placeholder="貼入文字內容…"></textarea>
     </div>
+    <div class="sh-sec">思考強度（effort）</div>
+    <select class="finput" id="set-effort" style="margin-top:8px">
+      <option value="low">低 — 最省，幾乎不思考</option>
+      <option value="medium" selected>中 — 平衡（建議）</option>
+      <option value="high">高 — 想得最深，最貴</option>
+    </select>
     <div class="sh-sec">自訂指令</div>
     <textarea class="ftextarea" id="set-inst" style="min-height:80px;margin-top:8px" placeholder="自訂指令…"></textarea>
     <button class="btn-primary" id="set-save-btn" style="margin-top:16px">儲存設定</button>
@@ -1108,6 +1114,7 @@ document.getElementById('pg-battery-btn')?.addEventListener('click', () => {
 
 let apiKey = '', dsKey = '', oaiKey = '', charName = '', avatarB64 = '', docs = [], instText = '';
 let thinkingEnabled = false;
+let effortLevel = 'medium';
 let searchEnabled = false;
 let conversations = []; // [{ id, name, history }]
 let currentConvId = null;
@@ -1191,6 +1198,7 @@ async function loadState() {
       docs = s.docs || [];
       instText = s.instText || '';
       thinkingEnabled = s.thinkingEnabled || false;
+      effortLevel = s.effortLevel || 'medium';
       searchEnabled = s.searchEnabled || false;
       darkMode = !!s.darkMode;
       gcalClientId = s.gcalClientId || '';
@@ -1357,7 +1365,7 @@ async function save() {
     // （例如背景主動訊息、切換思考/搜尋開關等），而 select 當下顯示的還是尚未同步的
     // 預設值，就會把錯誤的 claude-sonnet-4-6 寫回存檔，蓋掉使用者真正選的模型。
     const stateForSave = {
-      apiKey, dsKey, oaiKey, charName, avatarB64, docs, instText, thinkingEnabled, searchEnabled,
+      apiKey, dsKey, oaiKey, charName, avatarB64, docs, instText, thinkingEnabled, effortLevel, searchEnabled,
       darkMode, gcalClientId, gcalAndroidClientId, gcalInject, gcalEvents, gcalSnapshotTime,
       fitInject, fitData, fitSnapshotTime, fitTrendLastSentDate, proactiveConvIds, proactiveState,
       locInject, usageInject,
@@ -2825,7 +2833,10 @@ async function regenerateAssistantMsg() {
       claudeMessages = addHistoryCacheBreakpoint(apiMessages);
       body = { model, max_tokens: thinkingEnabled ? 16000 : 2048, stream: true };
       if (sys) body.system = [{ type:'text', text:sys, cache_control:{ type:'ephemeral', ttl:'1h' } }];
-      if (thinkingEnabled) body.thinking = (model==='claude-opus-5') ? { type:'adaptive' } : { type:'enabled', budget_tokens:10000 };
+      if (thinkingEnabled) {
+        if (model === 'claude-haiku-4-5-20251001') { body.thinking = { type:'enabled', budget_tokens:10000 }; }
+        else { body.thinking = { type:'adaptive' }; body.effort = effortLevel; }
+      }
       const _tools = getHealthTools();
       if (_tools.length) body.tools = _tools;
       headers = { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true', 'anthropic-beta': 'interleaved-thinking-2025-05-14' };
@@ -3032,7 +3043,10 @@ async function sendMsg() {
       claudeMessages = addHistoryCacheBreakpoint(apiMessages);
       body = { model, max_tokens: thinkingEnabled ? 16000 : 2048, stream: true };
       if (sys) body.system = [{ type:'text', text:sys, cache_control:{ type:'ephemeral', ttl:'1h' } }];
-      if (thinkingEnabled) body.thinking = (model==='claude-opus-5') ? { type:'adaptive' } : { type:'enabled', budget_tokens:10000 };
+      if (thinkingEnabled) {
+        if (model === 'claude-haiku-4-5-20251001') { body.thinking = { type:'enabled', budget_tokens:10000 }; }
+        else { body.thinking = { type:'adaptive' }; body.effort = effortLevel; }
+      }
       const _tools = getHealthTools();
       if (_tools.length) body.tools = _tools;
       headers = { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true', 'anthropic-beta': 'interleaved-thinking-2025-05-14' };
@@ -3970,7 +3984,10 @@ async function send() {
       claudeMessages = addHistoryCacheBreakpoint(apiMessages);
       body = { model, max_tokens: thinkingEnabled?16000:2048, stream: true };
       if (sys) body.system = [{ type:'text', text:sys, cache_control:{ type:'ephemeral', ttl:'1h' } }];
-      if (thinkingEnabled) body.thinking = (model==='claude-opus-5') ? { type:'adaptive' } : { type:'enabled', budget_tokens:10000 };
+      if (thinkingEnabled) {
+        if (model === 'claude-haiku-4-5-20251001') { body.thinking = { type:'enabled', budget_tokens:10000 }; }
+        else { body.thinking = { type:'adaptive' }; body.effort = effortLevel; }
+      }
       const _tools = [...(searchEnabled ? [{ type:'web_search_20250305', name:'web_search' }] : []), ...getHealthTools()];
       if (_tools.length) body.tools = _tools;
       headers = { 'Content-Type':'application/json', 'x-api-key':key, 'anthropic-version':'2023-06-01', 'anthropic-dangerous-direct-browser-access':'true', 'anthropic-beta':'interleaved-thinking-2025-05-14' };
@@ -4212,7 +4229,10 @@ async function regenerateFrom(historyIdx) {
       claudeMessages = addHistoryCacheBreakpoint(apiMessages);
       body={model,max_tokens:thinkingEnabled?16000:2048,stream:true};
       if (sys) body.system=[{type:'text',text:sys,cache_control:{type:'ephemeral',ttl:'1h'}}];
-      if (thinkingEnabled) body.thinking=(model==='claude-opus-5')?{type:'adaptive'}:{type:'enabled',budget_tokens:10000};
+      if (thinkingEnabled) {
+        if (model === 'claude-haiku-4-5-20251001') { body.thinking={type:'enabled',budget_tokens:10000}; }
+        else { body.thinking={type:'adaptive'}; body.effort=effortLevel; }
+      }
       const _tools=[...(searchEnabled?[{type:'web_search_20250305',name:'web_search'}]:[]),...getHealthTools()];
       if (_tools.length) body.tools=_tools;
       headers={'Content-Type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true','anthropic-beta':'interleaved-thinking-2025-05-14'};
@@ -4460,6 +4480,7 @@ function openSettings() {
   document.getElementById('set-oai-key').value=oaiKey;
   document.getElementById('set-name').value=charName;
   document.getElementById('set-inst').value=instText;
+  document.getElementById('set-effort').value=effortLevel;
   setAv('set-av-img','set-av-ph',avatarB64);
   renderAllDocs();
   document.getElementById('settings-panel').classList.add('open');
@@ -4475,6 +4496,7 @@ document.getElementById('set-save-btn').addEventListener('click', ()=>{
   if (ok) oaiKey=ok;
   charName=document.getElementById('set-name').value.trim()||'角色';
   instText=document.getElementById('set-inst').value.trim();
+  effortLevel=document.getElementById('set-effort').value;
   document.getElementById('hdr-name').textContent=charName;
   setAv('hdr-av-img','hdr-av-ph',avatarB64);
   save(); document.getElementById('settings-panel').classList.remove('open');
