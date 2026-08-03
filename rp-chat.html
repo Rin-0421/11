@@ -577,10 +577,6 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
           <option value="deepseek-v4-flash">DS V4 Flash</option>
           <option value="deepseek-v4-pro">DS V4 Pro</option>
         </optgroup>
-        <optgroup label="OpenAI">
-          <option value="gpt-4o-2024-05-13">GPT-4o 5月版</option>
-          <option value="gpt-4.1">GPT-4.1</option>
-        </optgroup>
       </select>
     </div>
   </div>
@@ -619,10 +615,6 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
         <optgroup label="DeepSeek">
           <option value="deepseek-v4-flash">DS V4 Flash</option>
           <option value="deepseek-v4-pro">DS V4 Pro</option>
-        </optgroup>
-        <optgroup label="OpenAI">
-          <option value="gpt-4o-2024-05-13">GPT-4o 5月版</option>
-          <option value="gpt-4.1">GPT-4.1</option>
         </optgroup>
       </select>
       <button class="think-toggle" id="msg-end-btn" title="結束對話" style="font-size:11px">結束</button>
@@ -714,8 +706,10 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
       <input class="finput" type="password" id="pg-claude-key" placeholder="sk-ant-api03-…" autocomplete="off">
       <label class="lbl">DeepSeek（選填）</label>
       <input class="finput" type="password" id="pg-ds-key" placeholder="sk-…" autocomplete="off">
-      <label class="lbl">OpenAI（選填）</label>
+      <label class="lbl">OpenAI（選填，目前選單裡沒有 GPT 模型可選，留著也沒差）</label>
       <input class="finput" type="password" id="pg-oai-key" placeholder="sk-…" autocomplete="off">
+      <label class="lbl">Google Gemini（選填，讓 DeepSeek 看得懂圖片用）</label>
+      <input class="finput" type="password" id="pg-gemini-key" placeholder="AIza…" autocomplete="off">
     </div>
     <div class="card" style="max-width:none">
       <div class="card-title">角色頭像</div>
@@ -1112,7 +1106,7 @@ document.getElementById('pg-battery-btn')?.addEventListener('click', () => {
   window.AndroidBridge?.requestIgnoreBatteryOptimization?.();
 });
 
-let apiKey = '', dsKey = '', oaiKey = '', charName = '', avatarB64 = '', docs = [], instText = '';
+let apiKey = '', dsKey = '', oaiKey = '', geminiKey = '', charName = '', avatarB64 = '', docs = [], instText = '';
 let thinkingEnabled = false;
 let effortLevel = 'medium';
 let searchEnabled = false;
@@ -1193,6 +1187,7 @@ async function loadState() {
       apiKey = s.apiKey || '';
       dsKey = s.dsKey || '';
       oaiKey = s.oaiKey || '';
+      geminiKey = s.geminiKey || '';
       charName = s.charName || '';
       avatarB64 = s.avatarB64 || '';
       docs = s.docs || [];
@@ -1365,7 +1360,7 @@ async function save() {
     // （例如背景主動訊息、切換思考/搜尋開關等），而 select 當下顯示的還是尚未同步的
     // 預設值，就會把錯誤的 claude-sonnet-4-6 寫回存檔，蓋掉使用者真正選的模型。
     const stateForSave = {
-      apiKey, dsKey, oaiKey, charName, avatarB64, docs, instText, thinkingEnabled, effortLevel, searchEnabled,
+      apiKey, dsKey, oaiKey, geminiKey, charName, avatarB64, docs, instText, thinkingEnabled, effortLevel, searchEnabled,
       darkMode, gcalClientId, gcalAndroidClientId, gcalInject, gcalEvents, gcalSnapshotTime,
       fitInject, fitData, fitSnapshotTime, fitTrendLastSentDate, proactiveConvIds, proactiveState,
       locInject, usageInject,
@@ -2007,6 +2002,32 @@ function getHealthTools() {
 // 讓後面真正負責角色扮演的模型（例如 GPT-4.1）拿去當參考資料用。
 // 這是繞開「一般 GPT 模型在 Chat Completions API 上根本不支援 web_search_preview 工具」
 // 這個限制的做法——OpenAI 只開放特定的搜尋專用模型才能真的搜尋。
+// 用 Gemini Flash-Lite 幫看不懂圖片的模型（例如 DeepSeek）先把圖片轉成文字描述。
+// mediaType/base64Data 是圖片本身（跟你存在歷史紀錄裡的 Claude 格式 image block 一樣的資料）。
+async function fetchGeminiImageDescription(mediaType, base64Data, gKey) {
+  if (!gKey) return null;
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${gKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{
+            parts: [
+              { text: '請用繁體中文詳細描述這張圖片的內容（人物、物品、場景、文字、氛圍），給另一個看不到圖片的 AI 當參考資料用，越具體越好。' },
+              { inline_data: { mime_type: mediaType, data: base64Data } }
+            ]
+          }]
+        })
+      }
+    );
+    if (!res.ok) { console.error('Gemini 圖片描述失敗', res.status, await res.text()); return null; }
+    const d = await res.json();
+    return d.candidates?.[0]?.content?.parts?.[0]?.text || null;
+  } catch(e) { console.error('Gemini 圖片描述例外', e); return null; }
+}
+
 async function fetchGptWebSearchContext(query, oaiKey) {
   if (!oaiKey || !query) return null;
   try {
@@ -3357,6 +3378,7 @@ document.getElementById('pg-proactive-msg').checked = proactiveMsgEnabled;
   document.getElementById('pg-claude-key').value = apiKey || '';
   document.getElementById('pg-ds-key').value = dsKey || '';
   document.getElementById('pg-oai-key').value = oaiKey || '';
+  document.getElementById('pg-gemini-key').value = geminiKey || '';
   document.getElementById('pg-name').value = charName || '';
   document.getElementById('pg-inst').value = instText || '';
   document.getElementById('pg-inst-msg').value = instTextMsg || '';
@@ -3517,7 +3539,8 @@ function doSaveSettings() {
   const ck=document.getElementById('pg-claude-key').value.trim();
   const dk=document.getElementById('pg-ds-key').value.trim();
   const ok=document.getElementById('pg-oai-key').value.trim();
-  apiKey = ck; dsKey = dk; oaiKey = ok;
+  const gk=document.getElementById('pg-gemini-key').value.trim();
+  apiKey = ck; dsKey = dk; oaiKey = ok; geminiKey = gk;
   charName=document.getElementById('pg-name').value.trim()||'角色';
   instText=document.getElementById('pg-inst').value.trim();
   instTextMsg=document.getElementById('pg-inst-msg').value.trim();
@@ -3960,7 +3983,8 @@ async function send() {
 
     if (useDS || useOAI) {
       // DeepSeek / OpenAI 用 OpenAI 相容格式
-      oaiMessages = apiMessages.map(m => {
+      const _lastIdx = apiMessages.length - 1;
+      oaiMessages = await Promise.all(apiMessages.map(async (m, idx) => {
         const role = m.role;
         if (Array.isArray(m.content)) {
           const parts = [];
@@ -3968,12 +3992,20 @@ async function send() {
             if (b.type === 'text') parts.push({ type: 'text', text: b.text });
             else if (b.type === 'image' && useOAI) {
               parts.push({ type: 'image_url', image_url: { url: `data:${b.source.media_type};base64,${b.source.data}` } });
+            } else if (b.type === 'image' && useDS) {
+              // DeepSeek 的公開 API 目前不支援圖片輸入。只對「這次新傳的訊息」呼叫 Gemini 描述，
+              // 歷史裡的舊圖片不會每次都重新描述一次，避免浪費 API 額度。
+              if (idx === _lastIdx) {
+                const desc = await fetchGeminiImageDescription(b.source.media_type, b.source.data, geminiKey);
+                parts.push({ type: 'text', text: desc ? `[圖片內容描述：${desc}]` : '[使用者傳了一張圖片，但目前沒有設定 Gemini API 金鑰，無法描述圖片內容]' });
+              }
+              // 不是最新這則的舊圖片，維持原本的行為：不塞給模型（避免每次都重講一次舊圖片內容）
             }
           }
           return { role, content: parts.length ? parts : m.content.filter(b=>b.type==='text').map(b=>b.text).join('') };
         }
         return { role, content: typeof m.content === 'string' ? m.content : '' };
-      });
+      }));
       if (sys) oaiMessages.unshift({ role: 'system', content: sys });
       body = { model, max_tokens: 2048, stream: true };
       // GPT 在 Chat Completions API 上不能直接用 web_search_preview（那是 Responses API 才有的工具類型），
@@ -4214,17 +4246,24 @@ async function regenerateFrom(historyIdx) {
     let body, headers, url, claudeMessages, oaiMessages;
 
     if (useDS || useOAI) {
-      oaiMessages=apiMessages.map(m=>{
+      const _lastIdx = apiMessages.length - 1;
+      oaiMessages = await Promise.all(apiMessages.map(async (m, idx) => {
         if (Array.isArray(m.content)) {
           const parts=[];
           for (const b of m.content) {
             if (b.type==='text') parts.push({type:'text',text:b.text});
             else if (b.type==='image'&&useOAI) parts.push({type:'image_url',image_url:{url:`data:${b.source.media_type};base64,${b.source.data}`}});
+            else if (b.type==='image'&&useDS) {
+              if (idx === _lastIdx) {
+                const desc = await fetchGeminiImageDescription(b.source.media_type, b.source.data, geminiKey);
+                parts.push({type:'text', text: desc ? `[圖片內容描述：${desc}]` : '[使用者傳了一張圖片，但目前沒有設定 Gemini API 金鑰，無法描述圖片內容]'});
+              }
+            }
           }
           return {role:m.role,content:parts.length?parts:m.content.filter(b=>b.type==='text').map(b=>b.text).join('')};
         }
         return {role:m.role,content:typeof m.content==='string'?m.content:''};
-      });
+      }));
       if (sys) oaiMessages.unshift({role:'system',content:sys});
       body={model,max_tokens:2048,stream:true};
       const _oaiTools=[...(useOAI && searchEnabled ? [getSearchWebToolOpenAI()] : []), ...getHealthToolsOpenAI()];
