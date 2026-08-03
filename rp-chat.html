@@ -1117,6 +1117,12 @@ let searchEnabled = false;
 let conversations = []; // [{ id, name, history }]
 let currentConvId = null;
 let pendingFiles = [], isLoading = false, abortCtrl = null, darkMode = false;
+
+// 告訴原生殼「現在是不是正在等模型回覆」，讓它知道這時候不能因為切背景又切回來就重新整理，
+// 不然串到一半的回覆、還沒存檔的訊息會被整個沖掉。
+function notifyNativeBusy(busy) {
+  try { window.AndroidBridge?.setBusy?.(busy); } catch(e) {}
+}
 let gcalClientId = '', gcalAndroidClientId = '', gcalToken = null, gcalTokenExpiry = 0, gcalInject = false, gcalEvents = [], gcalTokenClient = null, gcalSnapshotTime = 0;
 let fitInject = false, fitData = { steps: [], sleep: [], weight: [] }, fitSnapshotTime = 0, fitTrendLastSentDate = '';
 let locInject = false, usageInject = false;
@@ -2012,6 +2018,8 @@ function getHealthTools() {
 // 回傳 {text, error}：text 是描述內容（失敗時是 null），error 是失敗時的實際原因（沒失敗時是 null）。
 async function fetchGeminiImageDescription(mediaType, base64Data, gKey) {
   if (!gKey) return { text: null, error: '沒有設定 Gemini API 金鑰' };
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 20000); // 20 秒還沒回應就放棄，避免整個對話卡死等一個請求
   try {
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${gKey}`,
@@ -2025,7 +2033,8 @@ async function fetchGeminiImageDescription(mediaType, base64Data, gKey) {
               { inline_data: { mime_type: mediaType, data: base64Data } }
             ]
           }]
-        })
+        }),
+        signal: controller.signal
       }
     );
     if (!res.ok) {
@@ -2038,13 +2047,21 @@ async function fetchGeminiImageDescription(mediaType, base64Data, gKey) {
     if (!text) return { text: null, error: `回應格式異常：${JSON.stringify(d).slice(0, 200)}` };
     return { text, error: null };
   } catch(e) {
+    if (e.name === 'AbortError') {
+      console.error('Gemini 圖片描述逾時（20 秒）');
+      return { text: null, error: '查詢逾時（超過 20 秒沒回應）' };
+    }
     console.error('Gemini 圖片描述例外', e);
     return { text: null, error: `連線例外：${e.message}` };
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
 async function fetchGptWebSearchContext(query, oaiKey) {
   if (!oaiKey || !query) return null;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 20000);
   try {
     const res = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -2053,12 +2070,19 @@ async function fetchGptWebSearchContext(query, oaiKey) {
         model: 'gpt-4o-mini-search-preview',
         web_search_options: {},
         messages: [{ role: 'user', content: query }]
-      })
+      }),
+      signal: controller.signal
     });
     if (!res.ok) { console.error('web search 查詢失敗', res.status, await res.text()); return null; }
     const d = await res.json();
     return d.choices?.[0]?.message?.content || null;
-  } catch(e) { console.error('web search 例外', e); return null; }
+  } catch(e) {
+    if (e.name === 'AbortError') console.error('web search 逾時（20 秒）');
+    else console.error('web search 例外', e);
+    return null;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 // GPT 專用的搜尋工具定義（function 類型，Chat Completions API 支援這種讓模型自己決定要不要呼叫的工具）。
@@ -2781,6 +2805,7 @@ async function regenerateMsgFrom(idx) {
 async function regenerateAssistantMsg() {
   if (isLoading) return;
   isLoading = true;
+  notifyNativeBusy(true);
   abortCtrl = new AbortController();
   document.getElementById('msg-send-icon').style.display = 'none';
   document.getElementById('msg-stop-icon').style.display = '';
@@ -2951,6 +2976,7 @@ async function regenerateAssistantMsg() {
   }
 
   isLoading = false; abortCtrl = null;
+  notifyNativeBusy(false);
   document.getElementById('msg-send-icon').style.display = '';
   document.getElementById('msg-stop-icon').style.display = 'none';
 }
@@ -2960,6 +2986,7 @@ async function sendMsg() {
   const text = ui.value.trim();
   if ((!text && !msgPendingFiles.length) || isLoading) return;
   isLoading = true;
+  notifyNativeBusy(true);
   abortCtrl = new AbortController();
   document.getElementById('msg-send-icon').style.display = 'none';
   document.getElementById('msg-stop-icon').style.display = '';
@@ -3168,6 +3195,7 @@ async function sendMsg() {
   }
 
   isLoading = false; abortCtrl = null;
+  notifyNativeBusy(false);
   document.getElementById('msg-send-icon').style.display = '';
   document.getElementById('msg-stop-icon').style.display = 'none';
 }
@@ -3936,6 +3964,7 @@ async function send() {
   const text = ui.value.trim();
   if ((!text&&!pendingFiles.length)||isLoading) return;
   isLoading=true;
+  notifyNativeBusy(true);
   abortCtrl = new AbortController();
   document.getElementById('send-btn').disabled=false;
   document.getElementById('send-icon').style.display='none';
@@ -4110,6 +4139,7 @@ async function send() {
   }
 
   isLoading=false; abortCtrl=null;
+  notifyNativeBusy(false);
   document.getElementById('send-icon').style.display='';
   document.getElementById('stop-icon').style.display='none';
   document.getElementById('send-btn').disabled=false;
@@ -4221,6 +4251,7 @@ async function regenerateFrom(historyIdx) {
   renderMessages();
 
   isLoading=true;
+  notifyNativeBusy(true);
   abortCtrl=new AbortController();
   document.getElementById('send-btn').disabled=false;
   document.getElementById('send-icon').style.display='none';
@@ -4360,6 +4391,7 @@ async function regenerateFrom(historyIdx) {
   }
 
   isLoading=false; abortCtrl=null;
+  notifyNativeBusy(false);
   document.getElementById('send-icon').style.display='';
   document.getElementById('stop-icon').style.display='none';
   document.getElementById('send-btn').disabled=false;
