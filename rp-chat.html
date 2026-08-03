@@ -710,6 +710,8 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
       <input class="finput" type="password" id="pg-oai-key" placeholder="sk-…" autocomplete="off">
       <label class="lbl">Google Gemini（選填，讓 DeepSeek 看得懂圖片用）</label>
       <input class="finput" type="password" id="pg-gemini-key" placeholder="AIza…" autocomplete="off">
+      <label class="lbl">Gemini 描述圖片時的指令（可自訂）</label>
+      <textarea class="ftextarea" id="pg-gemini-img-prompt" style="min-height:72px" placeholder="給 Gemini 描述圖片內容的指令…"></textarea>
     </div>
     <div class="card" style="max-width:none">
       <div class="card-title">角色頭像</div>
@@ -1107,6 +1109,8 @@ document.getElementById('pg-battery-btn')?.addEventListener('click', () => {
 });
 
 let apiKey = '', dsKey = '', oaiKey = '', geminiKey = '', charName = '', avatarB64 = '', docs = [], instText = '';
+const DEFAULT_GEMINI_IMG_PROMPT = '請用繁體中文詳細描述這張圖片的內容，給另一個看不到圖片的 AI 當參考資料用：如果有人物，描述外貌特徵、表情、動作、穿著；如果是場景，描述環境、光線、氛圍；如果是食物，描述樣式、擺盤、色澤；圖片中出現的文字也要照實描述出來。盡量具體、避免籠統帶過。';
+let geminiImgPrompt = DEFAULT_GEMINI_IMG_PROMPT;
 let thinkingEnabled = false;
 let effortLevel = 'medium';
 let searchEnabled = false;
@@ -1188,6 +1192,7 @@ async function loadState() {
       dsKey = s.dsKey || '';
       oaiKey = s.oaiKey || '';
       geminiKey = s.geminiKey || '';
+      geminiImgPrompt = (typeof s.geminiImgPrompt === 'string' && s.geminiImgPrompt.trim()) ? s.geminiImgPrompt : DEFAULT_GEMINI_IMG_PROMPT;
       charName = s.charName || '';
       avatarB64 = s.avatarB64 || '';
       docs = s.docs || [];
@@ -1360,7 +1365,7 @@ async function save() {
     // （例如背景主動訊息、切換思考/搜尋開關等），而 select 當下顯示的還是尚未同步的
     // 預設值，就會把錯誤的 claude-sonnet-4-6 寫回存檔，蓋掉使用者真正選的模型。
     const stateForSave = {
-      apiKey, dsKey, oaiKey, geminiKey, charName, avatarB64, docs, instText, thinkingEnabled, effortLevel, searchEnabled,
+      apiKey, dsKey, oaiKey, geminiKey, geminiImgPrompt, charName, avatarB64, docs, instText, thinkingEnabled, effortLevel, searchEnabled,
       darkMode, gcalClientId, gcalAndroidClientId, gcalInject, gcalEvents, gcalSnapshotTime,
       fitInject, fitData, fitSnapshotTime, fitTrendLastSentDate, proactiveConvIds, proactiveState,
       locInject, usageInject,
@@ -2016,7 +2021,7 @@ async function fetchGeminiImageDescription(mediaType, base64Data, gKey) {
         body: JSON.stringify({
           contents: [{
             parts: [
-              { text: '請用繁體中文詳細描述這張圖片的內容（人物、物品、場景、文字、氛圍），給另一個看不到圖片的 AI 當參考資料用，越具體越好。' },
+              { text: geminiImgPrompt },
               { inline_data: { mime_type: mediaType, data: base64Data } }
             ]
           }]
@@ -3389,6 +3394,7 @@ document.getElementById('pg-proactive-msg').checked = proactiveMsgEnabled;
   document.getElementById('pg-ds-key').value = dsKey || '';
   document.getElementById('pg-oai-key').value = oaiKey || '';
   document.getElementById('pg-gemini-key').value = geminiKey || '';
+  document.getElementById('pg-gemini-img-prompt').value = geminiImgPrompt || DEFAULT_GEMINI_IMG_PROMPT;
   document.getElementById('pg-name').value = charName || '';
   document.getElementById('pg-inst').value = instText || '';
   document.getElementById('pg-inst-msg').value = instTextMsg || '';
@@ -3550,7 +3556,8 @@ function doSaveSettings() {
   const dk=document.getElementById('pg-ds-key').value.trim();
   const ok=document.getElementById('pg-oai-key').value.trim();
   const gk=document.getElementById('pg-gemini-key').value.trim();
-  apiKey = ck; dsKey = dk; oaiKey = ok; geminiKey = gk;
+  const gip=document.getElementById('pg-gemini-img-prompt').value.trim();
+  apiKey = ck; dsKey = dk; oaiKey = ok; geminiKey = gk; geminiImgPrompt = gip || DEFAULT_GEMINI_IMG_PROMPT;
   charName=document.getElementById('pg-name').value.trim()||'角色';
   instText=document.getElementById('pg-inst').value.trim();
   instTextMsg=document.getElementById('pg-inst-msg').value.trim();
