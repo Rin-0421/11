@@ -1972,6 +1972,44 @@ function buildFitContext(conv) {
 }
 
 // 供模型自己選擇調用的健康資料工具
+// 行事曆工具：查詢已經抓好的未來 30 天事件（不用另外打 API，直接查本機快取的 gcalEvents）。
+// Claude 用的 tool schema。
+function getCalendarTools() {
+  if (!gcalInject) return [];
+  return [{
+    name: 'get_calendar_events',
+    description: '查詢使用者行事曆上某天或某段時間範圍內的事件（目前只有未來 30 天內的資料）。start_date 必填，end_date 不填就只查 start_date 那一天。',
+    input_schema: {
+      type: 'object',
+      properties: {
+        start_date: { type: 'string', description: '查詢起始日期，格式 YYYY-MM-DD' },
+        end_date: { type: 'string', description: '查詢結束日期（含當天），格式 YYYY-MM-DD，不填就只查 start_date 那一天' }
+      },
+      required: ['start_date']
+    }
+  }];
+}
+
+// 同一個工具的 OpenAI/DeepSeek function calling 格式。
+function getCalendarToolsOpenAI() {
+  if (!gcalInject) return [];
+  return [{
+    type: 'function',
+    function: {
+      name: 'get_calendar_events',
+      description: '查詢使用者行事曆上某天或某段時間範圍內的事件（目前只有未來 30 天內的資料）。start_date 必填，end_date 不填就只查 start_date 那一天。',
+      parameters: {
+        type: 'object',
+        properties: {
+          start_date: { type: 'string', description: '查詢起始日期，格式 YYYY-MM-DD' },
+          end_date: { type: 'string', description: '查詢結束日期（含當天），格式 YYYY-MM-DD，不填就只查 start_date 那一天' }
+        },
+        required: ['start_date']
+      }
+    }
+  }];
+}
+
 function getHealthTools() {
   const tools = [];
   if (fitInject) {
@@ -2170,6 +2208,28 @@ async function executeHealthTool(name, input) {
     if (!input.query) return '沒有提供查詢內容。';
     const result = await fetchGptWebSearchContext(input.query, oaiKey);
     return result || '搜尋失敗或查不到相關資訊。';
+  }
+  if (name === 'get_calendar_events') {
+    if (!input.start_date) return '沒有提供查詢的起始日期。';
+    const startD = input.start_date;
+    const endD = input.end_date || input.start_date;
+    if (!gcalEvents.length) return '目前沒有行事曆資料（可能還沒連接 Google 帳號，或最近沒有重新整理過）。';
+    const matched = gcalEvents.filter(ev => {
+      const d = (ev.start.dateTime || ev.start.date).slice(0, 10);
+      return d >= startD && d <= endD;
+    });
+    if (!matched.length) return `${startD}${endD !== startD ? ' ~ ' + endD : ''} 沒有查到任何行程。`;
+    // 依日期分組，每天底下列出當天事件
+    const byDate = {};
+    matched.forEach(ev => {
+      const d = (ev.start.dateTime || ev.start.date).slice(0, 10);
+      if (!byDate[d]) byDate[d] = [];
+      const isAllDay = !!ev.start.date;
+      const t = isAllDay ? '全天' : new Date(ev.start.dateTime).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false });
+      byDate[d].push(`${t}：${ev.summary || '（無標題）'}`);
+    });
+    const lines = Object.keys(byDate).sort().map(d => `${d}\n` + byDate[d].map(l => `  - ${l}`).join('\n'));
+    return lines.join('\n');
   }
   if (name === 'get_today_health') {
     const todaySteps = fitData.steps.find(s => s.date === todayStr);
@@ -2394,7 +2454,7 @@ async function generateProactive(conv) {
     if (useDS) {
       const oaiMessages = [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages];
       body = { model, max_tokens: 2000 };
-      const _oaiTools = getHealthToolsOpenAI();
+      const _oaiTools = [...getHealthToolsOpenAI(), ...getCalendarToolsOpenAI()];
       if (_oaiTools.length) body.tools = _oaiTools;
       headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
       url = 'https://api.deepseek.com/chat/completions';
@@ -2402,7 +2462,7 @@ async function generateProactive(conv) {
     } else if (useOAI) {
       const oaiMessages = [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages];
       body = { model, max_tokens: 2000 };
-      const _oaiTools = getHealthToolsOpenAI();
+      const _oaiTools = [...getHealthToolsOpenAI(), ...getCalendarToolsOpenAI()];
       if (_oaiTools.length) body.tools = _oaiTools;
       headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
       url = 'https://api.openai.com/v1/chat/completions';
@@ -2412,7 +2472,7 @@ async function generateProactive(conv) {
       const claudeMessages = addHistoryCacheBreakpoint(apiMessages);
       body = { model, max_tokens: 2000 };
       if (sys) body.system = [{ type:'text', text:sys, cache_control:{ type:'ephemeral', ttl:'1h' } }];
-      const _tools = getHealthTools();
+      const _tools = [...getHealthTools(), ...getCalendarTools()];
       if (_tools.length) body.tools = _tools;
       headers = { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' };
       url = 'https://api.anthropic.com/v1/messages';
@@ -2472,7 +2532,7 @@ async function generateProactiveMsg() {
   try {
     const oaiMessages = [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages];
     const body = { model, max_tokens: 2000 };
-    const _oaiTools = getHealthToolsOpenAI();
+    const _oaiTools = [...getHealthToolsOpenAI(), ...getCalendarToolsOpenAI()];
     if (_oaiTools.length) body.tools = _oaiTools;
     const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
     const url = 'https://api.deepseek.com/chat/completions';
@@ -2879,14 +2939,14 @@ async function regenerateAssistantMsg() {
     if (useDS) {
       oaiMessages = [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages];
       body = { model, max_tokens: thinkingEnabled ? 8000 : 2048, stream: true };
-      const _oaiTools = getHealthToolsOpenAI();
+      const _oaiTools = [...getHealthToolsOpenAI(), ...getCalendarToolsOpenAI()];
       if (_oaiTools.length) body.tools = _oaiTools;
       headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
       url = 'https://api.deepseek.com/chat/completions';
     } else if (useOAI) {
       oaiMessages = [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages];
       body = { model, max_tokens: 2048, stream: true };
-      const _oaiTools = getHealthToolsOpenAI();
+      const _oaiTools = [...getHealthToolsOpenAI(), ...getCalendarToolsOpenAI()];
       if (_oaiTools.length) body.tools = _oaiTools;
       headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
       url = 'https://api.openai.com/v1/chat/completions';
@@ -2900,7 +2960,7 @@ async function regenerateAssistantMsg() {
       } else if (model !== 'claude-haiku-4-5-20251001') {
         body.thinking = { type: 'disabled' };
       }
-      const _tools = getHealthTools();
+      const _tools = [...getHealthTools(), ...getCalendarTools()];
       if (_tools.length) body.tools = _tools;
       headers = { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true', 'anthropic-beta': 'interleaved-thinking-2025-05-14' };
       url = 'https://api.anthropic.com/v1/messages';
@@ -3093,14 +3153,14 @@ async function sendMsg() {
     if (useDS) {
       oaiMessages = [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages];
       body = { model, max_tokens: thinkingEnabled ? 8000 : 2048, stream: true };
-      const _oaiTools = getHealthToolsOpenAI();
+      const _oaiTools = [...getHealthToolsOpenAI(), ...getCalendarToolsOpenAI()];
       if (_oaiTools.length) body.tools = _oaiTools;
       headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
       url = 'https://api.deepseek.com/chat/completions';
     } else if (useOAI) {
       oaiMessages = [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages];
       body = { model, max_tokens: 2048, stream: true };
-      const _oaiTools = getHealthToolsOpenAI();
+      const _oaiTools = [...getHealthToolsOpenAI(), ...getCalendarToolsOpenAI()];
       if (_oaiTools.length) body.tools = _oaiTools;
       headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
       url = 'https://api.openai.com/v1/chat/completions';
@@ -3114,7 +3174,7 @@ async function sendMsg() {
       } else if (model !== 'claude-haiku-4-5-20251001') {
         body.thinking = { type: 'disabled' };
       }
-      const _tools = getHealthTools();
+      const _tools = [...getHealthTools(), ...getCalendarTools()];
       if (_tools.length) body.tools = _tools;
       headers = { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true', 'anthropic-beta': 'interleaved-thinking-2025-05-14' };
       url = 'https://api.anthropic.com/v1/messages';
@@ -4057,7 +4117,7 @@ async function send() {
       // GPT 在 Chat Completions API 上不能直接用 web_search_preview（那是 Responses API 才有的工具類型），
       // 改成給它一個一般的 function 工具，讓 GPT 自己判斷要不要查、要查什麼，
       // 真的呼叫了才會去問便宜的 gpt-4o-mini-search-preview（實際執行在 executeHealthTool 裡）。
-      const _oaiTools = [...(useOAI && searchEnabled ? [getSearchWebToolOpenAI()] : []), ...getHealthToolsOpenAI()];
+      const _oaiTools = [...(useOAI && searchEnabled ? [getSearchWebToolOpenAI()] : []), ...[...getHealthToolsOpenAI(), ...getCalendarToolsOpenAI()]];
       if (_oaiTools.length) body.tools = _oaiTools;
       headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
       url = useDS ? 'https://api.deepseek.com/chat/completions' : 'https://api.openai.com/v1/chat/completions';
@@ -4072,7 +4132,7 @@ async function send() {
       } else if (model !== 'claude-haiku-4-5-20251001') {
         body.thinking = { type: 'disabled' };
       }
-      const _tools = [...(searchEnabled ? [{ type:'web_search_20250305', name:'web_search' }] : []), ...getHealthTools()];
+      const _tools = [...(searchEnabled ? [{ type:'web_search_20250305', name:'web_search' }] : []), ...[...getHealthTools(), ...getCalendarTools()]];
       if (_tools.length) body.tools = _tools;
       headers = { 'Content-Type':'application/json', 'x-api-key':key, 'anthropic-version':'2023-06-01', 'anthropic-dangerous-direct-browser-access':'true', 'anthropic-beta':'interleaved-thinking-2025-05-14' };
       url = 'https://api.anthropic.com/v1/messages';
@@ -4314,7 +4374,7 @@ async function regenerateFrom(historyIdx) {
       }));
       if (sys) oaiMessages.unshift({role:'system',content:sys});
       body={model,max_tokens:2048,stream:true};
-      const _oaiTools=[...(useOAI && searchEnabled ? [getSearchWebToolOpenAI()] : []), ...getHealthToolsOpenAI()];
+      const _oaiTools=[...(useOAI && searchEnabled ? [getSearchWebToolOpenAI()] : []), ...[...getHealthToolsOpenAI(), ...getCalendarToolsOpenAI()]];
       if (_oaiTools.length) body.tools=_oaiTools;
       headers={'Content-Type':'application/json','Authorization':`Bearer ${key}`};
       url=useDS?'https://api.deepseek.com/chat/completions':'https://api.openai.com/v1/chat/completions';
@@ -4328,7 +4388,7 @@ async function regenerateFrom(historyIdx) {
       } else if (model !== 'claude-haiku-4-5-20251001') {
         body.thinking={type:'disabled'};
       }
-      const _tools=[...(searchEnabled?[{type:'web_search_20250305',name:'web_search'}]:[]),...getHealthTools()];
+      const _tools=[...(searchEnabled?[{type:'web_search_20250305',name:'web_search'}]:[]),...[...getHealthTools(), ...getCalendarTools()]];
       if (_tools.length) body.tools=_tools;
       headers={'Content-Type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true','anthropic-beta':'interleaved-thinking-2025-05-14'};
       url='https://api.anthropic.com/v1/messages';
