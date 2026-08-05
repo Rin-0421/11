@@ -2453,7 +2453,7 @@ async function generateProactive(conv) {
     let body, headers, url, reply = '';
     if (useDS) {
       const oaiMessages = [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages];
-      body = { model, max_tokens: 2000 };
+      body = { model, max_tokens: 2000, thinking: { type: 'disabled' } }; // 主動訊息這種背景任務明確關閉思考，省錢也更穩定
       const _oaiTools = [...getHealthToolsOpenAI(), ...getCalendarToolsOpenAI()];
       if (_oaiTools.length) body.tools = _oaiTools;
       headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
@@ -2531,7 +2531,7 @@ async function generateProactiveMsg() {
 
   try {
     const oaiMessages = [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages];
-    const body = { model, max_tokens: 2000 };
+    const body = { model, max_tokens: 2000, thinking: { type: 'disabled' } }; // 主動訊息這種背景任務明確關閉思考，省錢也更穩定
     const _oaiTools = [...getHealthToolsOpenAI(), ...getCalendarToolsOpenAI()];
     if (_oaiTools.length) body.tools = _oaiTools;
     const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
@@ -2938,7 +2938,7 @@ async function regenerateAssistantMsg() {
     let body, headers, url, claudeMessages, oaiMessages;
     if (useDS) {
       oaiMessages = [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages];
-      body = { model, max_tokens: thinkingEnabled ? 8000 : 2048, stream: true };
+      body = { model, max_tokens: thinkingEnabled ? 8000 : 2048, stream: true, thinking: { type: thinkingEnabled ? 'enabled' : 'disabled' } };
       const _oaiTools = [...getHealthToolsOpenAI(), ...getCalendarToolsOpenAI()];
       if (_oaiTools.length) body.tools = _oaiTools;
       headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
@@ -3152,7 +3152,7 @@ async function sendMsg() {
 
     if (useDS) {
       oaiMessages = [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages];
-      body = { model, max_tokens: thinkingEnabled ? 8000 : 2048, stream: true };
+      body = { model, max_tokens: thinkingEnabled ? 8000 : 2048, stream: true, thinking: { type: thinkingEnabled ? 'enabled' : 'disabled' } };
       const _oaiTools = [...getHealthToolsOpenAI(), ...getCalendarToolsOpenAI()];
       if (_oaiTools.length) body.tools = _oaiTools;
       headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
@@ -3898,7 +3898,7 @@ async function maybeCompress() {
         res = await fetch('https://api.deepseek.com/chat/completions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${dsKey}` },
-          body: JSON.stringify({ model: 'deepseek-v4-pro', max_tokens: 1024, messages: [
+          body: JSON.stringify({ model: 'deepseek-v4-pro', max_tokens: 1024, thinking: { type: 'disabled' }, messages: [
             { role: 'system', content: COMPRESS_PROMPT },
             ...summaryHistory,
             { role: 'user', content: '請將以上對話整理成摘要。' }
@@ -4114,6 +4114,7 @@ async function send() {
       }));
       if (sys) oaiMessages.unshift({ role: 'system', content: sys });
       body = { model, max_tokens: 2048, stream: true };
+      if (useDS) body.thinking = { type: thinkingEnabled ? 'enabled' : 'disabled' }; // 讓 DS 的思考模式跟畫面上的思考開關真正連動，不然 DS 預設一律開著
       // GPT 在 Chat Completions API 上不能直接用 web_search_preview（那是 Responses API 才有的工具類型），
       // 改成給它一個一般的 function 工具，讓 GPT 自己判斷要不要查、要查什麼，
       // 真的呼叫了才會去問便宜的 gpt-4o-mini-search-preview（實際執行在 executeHealthTool 裡）。
@@ -4374,6 +4375,7 @@ async function regenerateFrom(historyIdx) {
       }));
       if (sys) oaiMessages.unshift({role:'system',content:sys});
       body={model,max_tokens:2048,stream:true};
+      if (useDS) body.thinking = { type: thinkingEnabled ? 'enabled' : 'disabled' }; // 讓 DS 的思考模式跟畫面上的思考開關真正連動，不然 DS 預設一律開著
       const _oaiTools=[...(useOAI && searchEnabled ? [getSearchWebToolOpenAI()] : []), ...[...getHealthToolsOpenAI(), ...getCalendarToolsOpenAI()]];
       if (_oaiTools.length) body.tools=_oaiTools;
       headers={'Content-Type':'application/json','Authorization':`Bearer ${key}`};
