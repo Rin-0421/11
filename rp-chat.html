@@ -712,6 +712,8 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
       <input class="finput" type="password" id="pg-gemini-key" placeholder="AIza…" autocomplete="off">
       <label class="lbl">Gemini 描述圖片時的指令（可自訂）</label>
       <textarea class="ftextarea" id="pg-gemini-img-prompt" style="min-height:72px" placeholder="給 Gemini 描述圖片內容的指令…"></textarea>
+      <label class="lbl">DeepSeek 溫度（選填，0~2，留空用 DS 自己的預設值；只有思考關閉時才會生效）</label>
+      <input class="finput" type="number" id="pg-ds-temp" min="0" max="2" step="0.1" placeholder="留空 = 用預設值">
     </div>
     <div class="card" style="max-width:none">
       <div class="card-title">角色頭像</div>
@@ -1114,6 +1116,7 @@ let geminiImgPrompt = DEFAULT_GEMINI_IMG_PROMPT;
 let thinkingEnabled = false;
 let effortLevel = 'medium';
 let searchEnabled = false;
+let dsTemperature = null; // null = 不特別設定，用 DeepSeek 自己的預設值；只有思考模式關閉時才會真的生效
 let conversations = []; // [{ id, name, history }]
 let currentConvId = null;
 let pendingFiles = [], isLoading = false, abortCtrl = null, darkMode = false;
@@ -1199,6 +1202,7 @@ async function loadState() {
       oaiKey = s.oaiKey || '';
       geminiKey = s.geminiKey || '';
       geminiImgPrompt = (typeof s.geminiImgPrompt === 'string' && s.geminiImgPrompt.trim()) ? s.geminiImgPrompt : DEFAULT_GEMINI_IMG_PROMPT;
+      dsTemperature = (typeof s.dsTemperature === 'number') ? s.dsTemperature : null;
       charName = s.charName || '';
       avatarB64 = s.avatarB64 || '';
       docs = s.docs || [];
@@ -1371,7 +1375,7 @@ async function save() {
     // （例如背景主動訊息、切換思考/搜尋開關等），而 select 當下顯示的還是尚未同步的
     // 預設值，就會把錯誤的 claude-sonnet-4-6 寫回存檔，蓋掉使用者真正選的模型。
     const stateForSave = {
-      apiKey, dsKey, oaiKey, geminiKey, geminiImgPrompt, charName, avatarB64, docs, instText, thinkingEnabled, effortLevel, searchEnabled,
+      apiKey, dsKey, oaiKey, geminiKey, geminiImgPrompt, dsTemperature, charName, avatarB64, docs, instText, thinkingEnabled, effortLevel, searchEnabled,
       darkMode, gcalClientId, gcalAndroidClientId, gcalInject, gcalEvents, gcalSnapshotTime,
       fitInject, fitData, fitSnapshotTime, fitTrendLastSentDate, proactiveConvIds, proactiveState,
       locInject, usageInject,
@@ -2454,6 +2458,7 @@ async function generateProactive(conv) {
     if (useDS) {
       const oaiMessages = [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages];
       body = { model, max_tokens: 2000, thinking: { type: 'disabled' } }; // 主動訊息這種背景任務明確關閉思考，省錢也更穩定
+      if (dsTemperature !== null) body.temperature = dsTemperature;
       const _oaiTools = [...getHealthToolsOpenAI(), ...getCalendarToolsOpenAI()];
       if (_oaiTools.length) body.tools = _oaiTools;
       headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
@@ -2532,6 +2537,7 @@ async function generateProactiveMsg() {
   try {
     const oaiMessages = [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages];
     const body = { model, max_tokens: 2000, thinking: { type: 'disabled' } }; // 主動訊息這種背景任務明確關閉思考，省錢也更穩定
+    if (dsTemperature !== null) body.temperature = dsTemperature;
     const _oaiTools = [...getHealthToolsOpenAI(), ...getCalendarToolsOpenAI()];
     if (_oaiTools.length) body.tools = _oaiTools;
     const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
@@ -2939,6 +2945,7 @@ async function regenerateAssistantMsg() {
     if (useDS) {
       oaiMessages = [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages];
       body = { model, max_tokens: thinkingEnabled ? 8000 : 2048, stream: true, thinking: { type: thinkingEnabled ? 'enabled' : 'disabled' } };
+      if (dsTemperature !== null) body.temperature = dsTemperature;
       const _oaiTools = [...getHealthToolsOpenAI(), ...getCalendarToolsOpenAI()];
       if (_oaiTools.length) body.tools = _oaiTools;
       headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
@@ -3153,6 +3160,7 @@ async function sendMsg() {
     if (useDS) {
       oaiMessages = [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages];
       body = { model, max_tokens: thinkingEnabled ? 8000 : 2048, stream: true, thinking: { type: thinkingEnabled ? 'enabled' : 'disabled' } };
+      if (dsTemperature !== null) body.temperature = dsTemperature;
       const _oaiTools = [...getHealthToolsOpenAI(), ...getCalendarToolsOpenAI()];
       if (_oaiTools.length) body.tools = _oaiTools;
       headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
@@ -3483,6 +3491,7 @@ document.getElementById('pg-proactive-msg').checked = proactiveMsgEnabled;
   document.getElementById('pg-oai-key').value = oaiKey || '';
   document.getElementById('pg-gemini-key').value = geminiKey || '';
   document.getElementById('pg-gemini-img-prompt').value = geminiImgPrompt || DEFAULT_GEMINI_IMG_PROMPT;
+  document.getElementById('pg-ds-temp').value = (dsTemperature === null || dsTemperature === undefined) ? '' : dsTemperature;
   document.getElementById('pg-name').value = charName || '';
   document.getElementById('pg-inst').value = instText || '';
   document.getElementById('pg-inst-msg').value = instTextMsg || '';
@@ -3645,7 +3654,10 @@ function doSaveSettings() {
   const ok=document.getElementById('pg-oai-key').value.trim();
   const gk=document.getElementById('pg-gemini-key').value.trim();
   const gip=document.getElementById('pg-gemini-img-prompt').value.trim();
+  const dtRaw = document.getElementById('pg-ds-temp').value.trim();
+  const dt = dtRaw === '' ? null : parseFloat(dtRaw);
   apiKey = ck; dsKey = dk; oaiKey = ok; geminiKey = gk; geminiImgPrompt = gip || DEFAULT_GEMINI_IMG_PROMPT;
+  dsTemperature = (dt !== null && !isNaN(dt) && dt >= 0 && dt <= 2) ? dt : null;
   charName=document.getElementById('pg-name').value.trim()||'角色';
   instText=document.getElementById('pg-inst').value.trim();
   instTextMsg=document.getElementById('pg-inst-msg').value.trim();
@@ -3898,7 +3910,7 @@ async function maybeCompress() {
         res = await fetch('https://api.deepseek.com/chat/completions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${dsKey}` },
-          body: JSON.stringify({ model: 'deepseek-v4-pro', max_tokens: 1024, thinking: { type: 'disabled' }, messages: [
+          body: JSON.stringify({ model: 'deepseek-v4-pro', max_tokens: 1024, thinking: { type: 'disabled' }, ...(dsTemperature !== null ? { temperature: dsTemperature } : {}), messages: [
             { role: 'system', content: COMPRESS_PROMPT },
             ...summaryHistory,
             { role: 'user', content: '請將以上對話整理成摘要。' }
@@ -4114,7 +4126,7 @@ async function send() {
       }));
       if (sys) oaiMessages.unshift({ role: 'system', content: sys });
       body = { model, max_tokens: 2048, stream: true };
-      if (useDS) body.thinking = { type: thinkingEnabled ? 'enabled' : 'disabled' }; // 讓 DS 的思考模式跟畫面上的思考開關真正連動，不然 DS 預設一律開著
+      if (useDS) { body.thinking = { type: thinkingEnabled ? 'enabled' : 'disabled' }; if (dsTemperature !== null) body.temperature = dsTemperature; } // 讓 DS 的思考模式跟畫面上的思考開關真正連動，不然 DS 預設一律開著
       // GPT 在 Chat Completions API 上不能直接用 web_search_preview（那是 Responses API 才有的工具類型），
       // 改成給它一個一般的 function 工具，讓 GPT 自己判斷要不要查、要查什麼，
       // 真的呼叫了才會去問便宜的 gpt-4o-mini-search-preview（實際執行在 executeHealthTool 裡）。
@@ -4375,7 +4387,7 @@ async function regenerateFrom(historyIdx) {
       }));
       if (sys) oaiMessages.unshift({role:'system',content:sys});
       body={model,max_tokens:2048,stream:true};
-      if (useDS) body.thinking = { type: thinkingEnabled ? 'enabled' : 'disabled' }; // 讓 DS 的思考模式跟畫面上的思考開關真正連動，不然 DS 預設一律開著
+      if (useDS) { body.thinking = { type: thinkingEnabled ? 'enabled' : 'disabled' }; if (dsTemperature !== null) body.temperature = dsTemperature; } // 讓 DS 的思考模式跟畫面上的思考開關真正連動，不然 DS 預設一律開著
       const _oaiTools=[...(useOAI && searchEnabled ? [getSearchWebToolOpenAI()] : []), ...[...getHealthToolsOpenAI(), ...getCalendarToolsOpenAI()]];
       if (_oaiTools.length) body.tools=_oaiTools;
       headers={'Content-Type':'application/json','Authorization':`Bearer ${key}`};
