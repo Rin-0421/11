@@ -749,11 +749,15 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
     <div class="card" style="max-width:none">
       <div class="card-title">對話壓縮</div>
       <div style="font-size:11px;color:var(--text-dim);margin-bottom:8px;line-height:1.5">
-        只影響主頁對話（聊天頁是另一套獨立機制）。累積到下面這個則數時，會自動把最前面的訊息壓縮成摘要，永遠保留最新 10 則完整紀錄。
+        只影響主頁對話（聊天頁是另一套獨立機制）。用 API 回傳的真實 token 用量判斷要不要壓縮，而不是數則數（則數不準，同樣則數可能差好幾倍的實際用量）。達到門檻時，把最前面的訊息壓縮成摘要，永遠保留最新 10 則完整紀錄；封存時圖片內容不會保留（避免本機空間一直增長），只留文字。
       </div>
+      <label style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);margin-bottom:8px">
+        <span style="font-size:13px;font-weight:600">觸發壓縮的 token 用量</span>
+        <input type="number" id="pg-compress-token-threshold" min="5000" max="900000" step="1000" style="width:84px;text-align:center;padding:4px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:inherit">
+      </label>
       <label style="display:flex;align-items:center;justify-content:space-between">
-        <span style="font-size:13px;font-weight:600">累積幾則觸發壓縮</span>
-        <input type="number" id="pg-compress-threshold" min="11" max="500" step="1" style="width:64px;text-align:center;padding:4px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:inherit">
+        <span style="font-size:13px;font-weight:600">則數防呆保底（用量還沒讀到資料時才會用到）</span>
+        <input type="number" id="pg-compress-threshold" min="11" max="1000" step="1" style="width:64px;text-align:center;padding:4px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:inherit">
       </label>
     </div>
     <div class="card" style="max-width:none">
@@ -1132,6 +1136,7 @@ let thinkingEnabled = false;
 let effortLevel = 'medium';
 let searchEnabled = false;
 let dsTemperature = null; // null = 不特別設定，用 DeepSeek 自己的預設值；只有思考模式關閉時才會真的生效
+let msgLastKnownTokens = 0; // 聊天頁最後一次 API 回覆時，讀到的真實 context 用量（token 數），壓縮判斷用
 let conversations = []; // [{ id, name, history }]
 let currentConvId = null;
 let pendingFiles = [], isLoading = false, abortCtrl = null, darkMode = false;
@@ -1149,7 +1154,8 @@ let notifications = [], notifEnabled = false, notifLeadMin = 10, notifCheckTimer
 let instTextMsg = '', msgHistory = [], msgArchives = [], msgPendingFiles = [], proactiveMsgEnabled = false, msgModel = 'claude-sonnet-4-6', proactiveHours = 3, proactiveMaxDaily = 3, proactiveStartHour = 9, proactiveEndHour = 21;
 const NOTIF_VIEW_ID = '__notifications__';
 
-let compressThreshold = 80; // 累積到幾則觸發壓縮，可在設定調整
+let compressThreshold = 80; // 累積到幾則觸發壓縮，可在設定調整（用量追蹤失效時的防呆保底，門檻拉高很多）
+let compressTokenThreshold = 70000; // 真實 token 用量達到這個數字才觸發壓縮（主要判斷依據）
 const KEEP_RECENT = 10; // 保留最新幾則不壓縮，固定不變
 
 // ── Helpers ──
@@ -1254,7 +1260,8 @@ async function loadState() {
       proactiveMaxDaily = (typeof s.proactiveMaxDaily === 'number' && s.proactiveMaxDaily > 0) ? s.proactiveMaxDaily : 3;
       proactiveStartHour = (typeof s.proactiveStartHour === 'number') ? s.proactiveStartHour : 9;
       proactiveEndHour = (typeof s.proactiveEndHour === 'number') ? s.proactiveEndHour : 21;
-      compressThreshold = (typeof s.compressThreshold === 'number' && s.compressThreshold > KEEP_RECENT) ? s.compressThreshold : 80;
+      compressThreshold = (typeof s.compressThreshold === 'number' && s.compressThreshold > KEEP_RECENT) ? s.compressThreshold : 300;
+      compressTokenThreshold = (typeof s.compressTokenThreshold === 'number' && s.compressTokenThreshold > 1000) ? s.compressTokenThreshold : 70000;
       msgModel = s.msgModel || 'claude-sonnet-4-6';
       applyDarkMode();
       conversations = s.conversations || [];
@@ -1395,7 +1402,7 @@ async function save() {
       fitInject, fitData, fitSnapshotTime, fitTrendLastSentDate, proactiveConvIds, proactiveState,
       locInject, usageInject,
       notifications, notifEnabled, notifLeadMin, notifiedIds: Array.from(notifiedIds),
-      instTextMsg, msgHistory, msgArchives, proactiveMsgEnabled, msgModel, proactiveHours, proactiveMaxDaily, proactiveStartHour, proactiveEndHour, compressThreshold,
+      instTextMsg, msgHistory, msgArchives, proactiveMsgEnabled, msgModel, proactiveHours, proactiveMaxDaily, proactiveStartHour, proactiveEndHour, compressThreshold, compressTokenThreshold,
       conversations, currentConvId,
       model: document.getElementById('chat-model').value
     };
@@ -3046,7 +3053,7 @@ async function regenerateAssistantMsg() {
     let body, headers, url, claudeMessages, oaiMessages;
     if (useDS) {
       oaiMessages = [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages];
-      body = { model, max_tokens: thinkingEnabled ? 8000 : 2048, stream: true, thinking: { type: thinkingEnabled ? 'enabled' : 'disabled' } };
+      body = { model, max_tokens: thinkingEnabled ? 8000 : 2048, stream: true, stream_options: { include_usage: true }, thinking: { type: thinkingEnabled ? 'enabled' : 'disabled' } };
       if (dsTemperature !== null) body.temperature = dsTemperature;
       const _oaiTools = [...(searchEnabled ? [getSearchWebToolOpenAI()] : []), ...getHealthToolsOpenAI(), ...getCalendarToolsOpenAI()];
       if (_oaiTools.length) body.tools = _oaiTools;
@@ -3054,7 +3061,7 @@ async function regenerateAssistantMsg() {
       url = 'https://api.deepseek.com/chat/completions';
     } else if (useOAI) {
       oaiMessages = [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages];
-      body = { model, max_tokens: 2048, stream: true };
+      body = { model, max_tokens: 2048, stream: true, stream_options: { include_usage: true } };
       const _oaiTools = [...(searchEnabled ? [getSearchWebToolOpenAI()] : []), ...getHealthToolsOpenAI(), ...getCalendarToolsOpenAI()];
       if (_oaiTools.length) body.tools = _oaiTools;
       headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
@@ -3097,7 +3104,7 @@ async function regenerateAssistantMsg() {
       }
     };
 
-    let { reply: finalReply, thinkingText } = (useDS || useOAI)
+    let { reply: finalReply, thinkingText, usage: _usage } = (useDS || useOAI)
       ? await runOpenAIWithTools(oaiMessages, body, headers, url, useDS, useOAI, abortCtrl.signal,
           (chunk) => {
             _setupThink();
@@ -3127,6 +3134,7 @@ async function regenerateAssistantMsg() {
           }
         );
     finalReply = finalReply || '（沒有回應）';
+    if (_usage) msgLastKnownTokens = _usage.totalTokens;
     if (_thinkEl) _thinkEl.open = false;
     asstMsg.content = finalReply;
     if (thinkingText) {
@@ -3261,7 +3269,7 @@ async function sendMsg() {
 
     if (useDS) {
       oaiMessages = [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages];
-      body = { model, max_tokens: thinkingEnabled ? 8000 : 2048, stream: true, thinking: { type: thinkingEnabled ? 'enabled' : 'disabled' } };
+      body = { model, max_tokens: thinkingEnabled ? 8000 : 2048, stream: true, stream_options: { include_usage: true }, thinking: { type: thinkingEnabled ? 'enabled' : 'disabled' } };
       if (dsTemperature !== null) body.temperature = dsTemperature;
       const _oaiTools = [...(searchEnabled ? [getSearchWebToolOpenAI()] : []), ...getHealthToolsOpenAI(), ...getCalendarToolsOpenAI()];
       if (_oaiTools.length) body.tools = _oaiTools;
@@ -3269,7 +3277,7 @@ async function sendMsg() {
       url = 'https://api.deepseek.com/chat/completions';
     } else if (useOAI) {
       oaiMessages = [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages];
-      body = { model, max_tokens: 2048, stream: true };
+      body = { model, max_tokens: 2048, stream: true, stream_options: { include_usage: true } };
       const _oaiTools = [...(searchEnabled ? [getSearchWebToolOpenAI()] : []), ...getHealthToolsOpenAI(), ...getCalendarToolsOpenAI()];
       if (_oaiTools.length) body.tools = _oaiTools;
       headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
@@ -3316,7 +3324,7 @@ async function sendMsg() {
       }
     };
 
-    let { reply: finalReply, thinkingText } = (useDS || useOAI)
+    let { reply: finalReply, thinkingText, usage: _usage } = (useDS || useOAI)
       ? await runOpenAIWithTools(oaiMessages, body, headers, url, useDS, useOAI, abortCtrl.signal,
           (chunk) => {
             _setupThink();
@@ -3346,6 +3354,7 @@ async function sendMsg() {
           }
         );
     finalReply = finalReply || '（沒有回應）';
+    if (_usage) msgLastKnownTokens = _usage.totalTokens;
     if (_thinkEl) _thinkEl.open = false;
     asstMsg.content = finalReply;
     // 將思考也存進 msgHistory，方便下次還原
@@ -3581,6 +3590,7 @@ document.getElementById('pg-proactive-msg').checked = proactiveMsgEnabled;
   document.getElementById('pg-proactive-start-hour').value = proactiveStartHour;
   document.getElementById('pg-proactive-end-hour').value = proactiveEndHour;
   document.getElementById('pg-proactive-hours').value = proactiveHours;
+  document.getElementById('pg-compress-token-threshold').value = compressTokenThreshold;
   document.getElementById('pg-compress-threshold').value = compressThreshold;
   document.getElementById('pg-proactive-max-daily').value = proactiveMaxDaily;
   renderProactiveList();
@@ -3699,9 +3709,15 @@ document.getElementById('pg-proactive-hours').addEventListener('change', e=>{
   e.target.value = proactiveHours;
   save();
 });
+document.getElementById('pg-compress-token-threshold').addEventListener('change', e=>{
+  const v = parseInt(e.target.value, 10);
+  compressTokenThreshold = (!isNaN(v) && v >= 5000) ? v : 70000;
+  e.target.value = compressTokenThreshold;
+  save();
+});
 document.getElementById('pg-compress-threshold').addEventListener('change', e=>{
   const v = parseInt(e.target.value, 10);
-  compressThreshold = (!isNaN(v) && v > KEEP_RECENT) ? v : 80;
+  compressThreshold = (!isNaN(v) && v > KEEP_RECENT) ? v : 300;
   e.target.value = compressThreshold;
   save();
 });
@@ -3975,7 +3991,12 @@ async function maybeCompress() {
   const conv = currentConv();
   if (!conv) return;
   const real = conv.history.filter(m=>!m._notice);
-  if (real.length < compressThreshold) return;
+  // 主要依據：這個對話最後一次 API 回覆時，讀到的真實 token 用量有沒有達標。
+  // 防呆：如果還沒抓到任何用量資料（例如剛開新對話、第一輪還沒問過 API），退回用則數守底，
+  // 避免對話一直不觸發壓縮、無限增長。
+  const tokenReady = (conv.lastKnownTokens || 0) >= compressTokenThreshold;
+  const countFallback = !conv.lastKnownTokens && real.length >= compressThreshold;
+  if (!tokenReady && !countFallback) return;
   const toCompress = real.slice(0, real.length-KEEP_RECENT);
   const toKeep = real.slice(real.length-KEEP_RECENT);
   const summaryHistory = toCompress.map(m => ({
@@ -4006,7 +4027,7 @@ async function maybeCompress() {
     document.getElementById('summary-step-loading').style.display = '';
 
     try {
-      let res, summary = '', modelLabel = chosen;
+      let res, summary = '', modelLabel = chosen, incomplete = false;
       if (chosen === 'ds-pro') {
         modelLabel = 'DeepSeek Pro';
         res = await fetch('https://api.deepseek.com/chat/completions', {
@@ -4019,6 +4040,8 @@ async function maybeCompress() {
           ]})
         });
         const d = await res.json(); summary = d.choices?.[0]?.message?.content || '';
+        // 摘要沒有正常結束（例如被截斷）就算失敗，不要把殘缺的摘要存進帳本
+        if (summary && d.choices?.[0]?.finish_reason && d.choices[0].finish_reason !== 'stop') incomplete = true;
       } else if (chosen === 'haiku' || chosen === 'sonnet') {
         const m = chosen === 'haiku' ? 'claude-haiku-4-5-20251001' : 'claude-sonnet-4-6';
         modelLabel = chosen === 'haiku' ? 'Haiku 4.5' : 'Sonnet 4.6';
@@ -4028,6 +4051,7 @@ async function maybeCompress() {
           body: JSON.stringify({ model: m, max_tokens: 1024, system: COMPRESS_PROMPT, messages: [...summaryHistory, { role: 'user', content: '請將以上對話整理成摘要。' }] })
         });
         const d = await res.json(); summary = d.content?.[0]?.text || '';
+        if (summary && d.stop_reason && d.stop_reason !== 'end_turn') incomplete = true;
       } else if (chosen === 'gpt4o') {
         modelLabel = 'GPT-4o';
         res = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -4040,9 +4064,16 @@ async function maybeCompress() {
           ]})
         });
         const d = await res.json(); summary = d.choices?.[0]?.message?.content || '';
+        if (summary && d.choices?.[0]?.finish_reason && d.choices[0].finish_reason !== 'stop') incomplete = true;
       }
 
-      if (!summary) { modal.style.display = 'none'; return; }
+      // 摘要沒生出來、或生出來但被截斷（半殘），這次壓縮都不算數：不動 conv.history/archive，
+      // 下次再有訊息送出時 maybeCompress() 會自然重新判斷一次，等於自動重試，不用額外做冷卻計時器。
+      if (!summary || incomplete) {
+        modal.style.display = 'none';
+        if (incomplete) console.error('壓縮摘要被截斷，本次跳過，不套用', summary);
+        return;
+      }
 
       // 進入步驟三（編輯）
       document.getElementById('summary-step-loading').style.display = 'none';
@@ -4052,17 +4083,29 @@ async function maybeCompress() {
 
       function applyCompression(finalSummary) {
         modal.style.display = 'none';
+        // 封存前，把圖片內容換成一句提示文字，只留文字紀錄——圖片才是真正占空間的大頭，
+        // 文字紀錄留著幾乎不占空間，不用像圖片那樣急著清掉。
+        const toArchive = toCompress.map(m => {
+          if (!Array.isArray(m.content)) return m;
+          const hasImg = m.content.some(b => b.type === 'image');
+          if (!hasImg) return m;
+          return {
+            ...m,
+            content: m.content.map(b => b.type === 'image' ? { type: 'text', text: '[圖片：已封存，內容未保留]' } : b)
+          };
+        });
         // 封存邏輯：push 前若 archive 已有內容，先刪掉最舊的 40 則
         if (!Array.isArray(conv.archive)) conv.archive = [];
         if (conv.archive.length > 0) {
           conv.archive.splice(0, 40);
         }
-        conv.archive.push(...toCompress);
+        conv.archive.push(...toArchive);
         conv.history = [
           { _notice: `✦ 對話已自動壓縮（${modelLabel}），保留最近 10 則完整紀錄` },
           { role: 'user', content: `[以下是之前對話的摘要]\n${finalSummary}\n[摘要結束，以下繼續正常對話]` },
           ...toKeep
         ];
+        conv.lastKnownTokens = 0; // 壓縮完，context 已經大幅縮小，重新從 0 開始累計，等下次真實回覆再更新
         save(); renderConvList();
         document.getElementById('messages').innerHTML = '';
         renderMessages();
@@ -4227,7 +4270,7 @@ async function send() {
         return { role, content: typeof m.content === 'string' ? m.content : '' };
       }));
       if (sys) oaiMessages.unshift({ role: 'system', content: sys });
-      body = { model, max_tokens: 2048, stream: true };
+      body = { model, max_tokens: 2048, stream: true, stream_options: { include_usage: true } };
       if (useDS) { body.thinking = { type: thinkingEnabled ? 'enabled' : 'disabled' }; if (dsTemperature !== null) body.temperature = dsTemperature; } // 讓 DS 的思考模式跟畫面上的思考開關真正連動，不然 DS 預設一律開著
       // GPT 在 Chat Completions API 上不能直接用 web_search_preview（那是 Responses API 才有的工具類型），
       // 改成給它一個一般的 function 工具，讓 GPT 自己判斷要不要查、要查什麼，
@@ -4271,7 +4314,7 @@ async function send() {
       }
     };
 
-    let { reply, thinkingText } = (useDS || useOAI)
+    let { reply, thinkingText, usage: _usage } = (useDS || useOAI)
       ? await runOpenAIWithTools(oaiMessages, body, headers, url, useDS, useOAI, abortCtrl.signal,
           (chunk) => { _setupThink(); _thinkContent.textContent += chunk; scrollBot(); },
           (chunk) => { _streamP.textContent += chunk; scrollBot(); }
@@ -4281,6 +4324,7 @@ async function send() {
           (chunk) => { _streamP.textContent += chunk; scrollBot(); }
         );
     reply = reply || '（沒有回應）';
+    if (_usage) conv.lastKnownTokens = _usage.totalTokens;
 
     if (_thinkEl) _thinkEl.open = false;
     renderBt(_btEl, reply);
@@ -4488,7 +4532,7 @@ async function regenerateFrom(historyIdx) {
         return {role:m.role,content:typeof m.content==='string'?m.content:''};
       }));
       if (sys) oaiMessages.unshift({role:'system',content:sys});
-      body={model,max_tokens:2048,stream:true};
+      body={model,max_tokens:2048,stream:true,stream_options:{include_usage:true}};
       if (useDS) { body.thinking = { type: thinkingEnabled ? 'enabled' : 'disabled' }; if (dsTemperature !== null) body.temperature = dsTemperature; } // 讓 DS 的思考模式跟畫面上的思考開關真正連動，不然 DS 預設一律開著
       const _oaiTools=[...(searchEnabled ? [getSearchWebToolOpenAI()] : []), ...[...getHealthToolsOpenAI(), ...getCalendarToolsOpenAI()]];
       if (_oaiTools.length) body.tools=_oaiTools;
@@ -4527,7 +4571,7 @@ async function regenerateFrom(historyIdx) {
       }
     };
 
-    let { reply, thinkingText } = (useDS || useOAI)
+    let { reply, thinkingText, usage: _usage } = (useDS || useOAI)
       ? await runOpenAIWithTools(oaiMessages, body, headers, url, useDS, useOAI, abortCtrl.signal,
           (chunk) => { _setupThink(); _thinkContent.textContent += chunk; scrollBot(); },
           (chunk) => { _streamP.textContent += chunk; scrollBot(); }
@@ -4537,6 +4581,7 @@ async function regenerateFrom(historyIdx) {
           (chunk) => { _streamP.textContent += chunk; scrollBot(); }
         );
     reply = reply || '（沒有回應）';
+    if (_usage) conv.lastKnownTokens = _usage.totalTokens;
 
     if (_thinkEl) _thinkEl.open = false;
     renderBt(_btEl, reply);
@@ -4587,6 +4632,7 @@ async function doStream(res, useDS, useOAI, onThink, onReply) {
   let stopReason = null;
   let toolCalls = []; // Claude: [{ id, name, inputJson }]
   let curToolIdx = -1;
+  let usage = null; // { inputTokens, outputTokens, totalTokens }
 
   while (true) {
     const { done, value } = await reader.read();
@@ -4614,8 +4660,12 @@ async function doStream(res, useDS, useOAI, onThink, onReply) {
             });
           }
           if (d.choices?.[0]?.finish_reason) stopReason = d.choices[0].finish_reason;
+          // 要有 stream_options:{include_usage:true} 才會有這個欄位，通常出現在最後一個 chunk
+          if (d.usage) usage = { inputTokens: d.usage.prompt_tokens || 0, outputTokens: d.usage.completion_tokens || 0, totalTokens: d.usage.total_tokens || 0 };
         } else {
-          if (d.type === 'content_block_start') {
+          if (d.type === 'message_start') {
+            if (d.message?.usage) usage = { inputTokens: d.message.usage.input_tokens || 0, outputTokens: d.message.usage.output_tokens || 0, totalTokens: (d.message.usage.input_tokens||0)+(d.message.usage.output_tokens||0) };
+          } else if (d.type === 'content_block_start') {
             claudeBlockType = d.content_block?.type;
             if (claudeBlockType === 'tool_use') {
               toolCalls.push({ id: d.content_block.id, name: d.content_block.name, inputJson: '' });
@@ -4627,6 +4677,8 @@ async function doStream(res, useDS, useOAI, onThink, onReply) {
             else if (d.delta?.type === 'input_json_delta' && curToolIdx >= 0) { toolCalls[curToolIdx].inputJson += d.delta.partial_json || ''; }
           } else if (d.type === 'message_delta') {
             if (d.delta?.stop_reason) stopReason = d.delta.stop_reason;
+            // message_delta 的 usage.output_tokens 是累計值，且這時 input_tokens 才是真正完整的請求大小
+            if (d.usage && usage) { usage.outputTokens = d.usage.output_tokens || usage.outputTokens; usage.totalTokens = usage.inputTokens + usage.outputTokens; }
           }
         }
       } catch(e) {}
@@ -4637,7 +4689,7 @@ async function doStream(res, useDS, useOAI, onThink, onReply) {
     try { input = tc.inputJson ? JSON.parse(tc.inputJson) : {}; } catch(e) {}
     return { id: tc.id, name: tc.name, input };
   });
-  return { reply, thinkingText: thinking || null, stopReason, toolCalls: parsedToolCalls };
+  return { reply, thinkingText: thinking || null, stopReason, toolCalls: parsedToolCalls, usage };
 }
 
 // 專門給 Claude 用：處理「模型呼叫工具 → 我們執行 → 把結果丟回去 → 模型接著生成最終回覆」的來回迴圈。
@@ -4645,10 +4697,12 @@ async function doStream(res, useDS, useOAI, onThink, onReply) {
 async function runClaudeWithTools(initialMessages, body, headers, url, abortSignal, onThink, onReply) {
   let messages = initialMessages;
   let accumulatedReply = '', accumulatedThinking = '';
+  let lastUsage = null;
   for (let round = 0; round < 4; round++) {
     const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ ...body, messages }), signal: abortSignal });
     if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err?.error?.message || `HTTP ${res.status}`); }
-    const { reply, thinkingText, stopReason, toolCalls } = await doStream(res, false, false, onThink, onReply);
+    const { reply, thinkingText, stopReason, toolCalls, usage } = await doStream(res, false, false, onThink, onReply);
+    if (usage) lastUsage = usage;
     if (reply) accumulatedReply += reply;
     if (thinkingText) accumulatedThinking += (accumulatedThinking ? '\n\n' : '') + thinkingText;
     if (stopReason === 'tool_use' && toolCalls && toolCalls.length) {
@@ -4662,7 +4716,7 @@ async function runClaudeWithTools(initialMessages, body, headers, url, abortSign
     }
     break;
   }
-  return { reply: accumulatedReply || '（沒有回應）', thinkingText: accumulatedThinking || null };
+  return { reply: accumulatedReply || '（沒有回應）', thinkingText: accumulatedThinking || null, usage: lastUsage };
 }
 
 // 非串流版（給主動訊息用，這兩處本來就是用 res.json() 一次拿完整回覆，不是用 doStream）
@@ -4694,10 +4748,12 @@ async function runClaudeWithToolsNonStream(initialMessages, body, headers, url) 
 async function runOpenAIWithTools(initialMessages, body, headers, url, useDS, useOAI, abortSignal, onThink, onReply) {
   let messages = initialMessages;
   let accumulatedReply = '', accumulatedThinking = '';
+  let lastUsage = null;
   for (let round = 0; round < 4; round++) {
     const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ ...body, messages }), signal: abortSignal });
     if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err?.error?.message || `HTTP ${res.status}`); }
-    const { reply, thinkingText, stopReason, toolCalls } = await doStream(res, useDS, useOAI, onThink, onReply);
+    const { reply, thinkingText, stopReason, toolCalls, usage } = await doStream(res, useDS, useOAI, onThink, onReply);
+    if (usage) lastUsage = usage;
     if (reply) accumulatedReply += reply;
     if (thinkingText) accumulatedThinking += (accumulatedThinking ? '\n\n' : '') + thinkingText;
     if (stopReason === 'tool_calls' && toolCalls && toolCalls.length) {
@@ -4713,7 +4769,7 @@ async function runOpenAIWithTools(initialMessages, body, headers, url, useDS, us
     }
     break;
   }
-  return { reply: accumulatedReply || '（沒有回應）', thinkingText: accumulatedThinking || null };
+  return { reply: accumulatedReply || '（沒有回應）', thinkingText: accumulatedThinking || null, usage: lastUsage };
 }
 
 // 非串流版（給主動訊息用）
