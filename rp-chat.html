@@ -2074,7 +2074,8 @@ async function fetchGeminiImageDescription(mediaType, base64Data, gKey) {
               { text: geminiImgPrompt },
               { inline_data: { mime_type: mediaType, data: base64Data } }
             ]
-          }]
+          }],
+          tools: [{ google_search: {} }] // 需要的話（例如圖片裡是某個地標、商品）可以連網查證是什麼
         }),
         signal: controller.signal
       }
@@ -2094,6 +2095,44 @@ async function fetchGeminiImageDescription(mediaType, base64Data, gKey) {
       return { text: null, error: '查詢逾時（超過 20 秒沒回應）' };
     }
     console.error('Gemini 圖片描述例外', e);
+    return { text: null, error: `連線例外：${e.message}` };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+// 用 Gemini 搭配 Google 官方的 Grounding with Google Search 做搜尋，取代原本只給 GPT 用、
+// 現在已經沒有模型在用的 fetchGptWebSearchContext。回傳 {text, error}，格式跟圖片描述那個函式一致。
+async function fetchGeminiSearchAnswer(query, gKey) {
+  if (!gKey) return { text: null, error: '沒有設定 Gemini API 金鑰' };
+  if (!query) return { text: null, error: '沒有提供查詢內容' };
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 20000);
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${gKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: query }] }],
+          tools: [{ google_search: {} }]
+        }),
+        signal: controller.signal
+      }
+    );
+    if (!res.ok) {
+      const errBody = await res.text();
+      console.error('Gemini 搜尋失敗', res.status, errBody);
+      return { text: null, error: `HTTP ${res.status}：${errBody.slice(0, 200)}` };
+    }
+    const d = await res.json();
+    const text = d.candidates?.[0]?.content?.parts?.map(p => p.text).filter(Boolean).join('') || null;
+    if (!text) return { text: null, error: `回應格式異常：${JSON.stringify(d).slice(0, 200)}` };
+    return { text, error: null };
+  } catch(e) {
+    if (e.name === 'AbortError') return { text: null, error: '查詢逾時（超過 20 秒沒回應）' };
+    console.error('Gemini 搜尋例外', e);
     return { text: null, error: `連線例外：${e.message}` };
   } finally {
     clearTimeout(timeoutId);
@@ -2210,8 +2249,8 @@ async function executeHealthTool(name, input) {
   const todayStr = new Date().toISOString().slice(0, 10);
   if (name === 'search_web') {
     if (!input.query) return '沒有提供查詢內容。';
-    const result = await fetchGptWebSearchContext(input.query, oaiKey);
-    return result || '搜尋失敗或查不到相關資訊。';
+    const { text: result, error: searchErr } = await fetchGeminiSearchAnswer(input.query, geminiKey);
+    return result || `搜尋失敗：${searchErr || '未知錯誤'}`;
   }
   if (name === 'get_calendar_events') {
     if (!input.start_date) return '沒有提供查詢的起始日期。';
@@ -2946,14 +2985,14 @@ async function regenerateAssistantMsg() {
       oaiMessages = [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages];
       body = { model, max_tokens: thinkingEnabled ? 8000 : 2048, stream: true, thinking: { type: thinkingEnabled ? 'enabled' : 'disabled' } };
       if (dsTemperature !== null) body.temperature = dsTemperature;
-      const _oaiTools = [...getHealthToolsOpenAI(), ...getCalendarToolsOpenAI()];
+      const _oaiTools = [...(searchEnabled ? [getSearchWebToolOpenAI()] : []), ...getHealthToolsOpenAI(), ...getCalendarToolsOpenAI()];
       if (_oaiTools.length) body.tools = _oaiTools;
       headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
       url = 'https://api.deepseek.com/chat/completions';
     } else if (useOAI) {
       oaiMessages = [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages];
       body = { model, max_tokens: 2048, stream: true };
-      const _oaiTools = [...getHealthToolsOpenAI(), ...getCalendarToolsOpenAI()];
+      const _oaiTools = [...(searchEnabled ? [getSearchWebToolOpenAI()] : []), ...getHealthToolsOpenAI(), ...getCalendarToolsOpenAI()];
       if (_oaiTools.length) body.tools = _oaiTools;
       headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
       url = 'https://api.openai.com/v1/chat/completions';
@@ -3161,14 +3200,14 @@ async function sendMsg() {
       oaiMessages = [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages];
       body = { model, max_tokens: thinkingEnabled ? 8000 : 2048, stream: true, thinking: { type: thinkingEnabled ? 'enabled' : 'disabled' } };
       if (dsTemperature !== null) body.temperature = dsTemperature;
-      const _oaiTools = [...getHealthToolsOpenAI(), ...getCalendarToolsOpenAI()];
+      const _oaiTools = [...(searchEnabled ? [getSearchWebToolOpenAI()] : []), ...getHealthToolsOpenAI(), ...getCalendarToolsOpenAI()];
       if (_oaiTools.length) body.tools = _oaiTools;
       headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
       url = 'https://api.deepseek.com/chat/completions';
     } else if (useOAI) {
       oaiMessages = [...(sys ? [{role:'system', content:sys}] : []), ...apiMessages];
       body = { model, max_tokens: 2048, stream: true };
-      const _oaiTools = [...getHealthToolsOpenAI(), ...getCalendarToolsOpenAI()];
+      const _oaiTools = [...(searchEnabled ? [getSearchWebToolOpenAI()] : []), ...getHealthToolsOpenAI(), ...getCalendarToolsOpenAI()];
       if (_oaiTools.length) body.tools = _oaiTools;
       headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
       url = 'https://api.openai.com/v1/chat/completions';
@@ -4130,7 +4169,7 @@ async function send() {
       // GPT 在 Chat Completions API 上不能直接用 web_search_preview（那是 Responses API 才有的工具類型），
       // 改成給它一個一般的 function 工具，讓 GPT 自己判斷要不要查、要查什麼，
       // 真的呼叫了才會去問便宜的 gpt-4o-mini-search-preview（實際執行在 executeHealthTool 裡）。
-      const _oaiTools = [...(useOAI && searchEnabled ? [getSearchWebToolOpenAI()] : []), ...[...getHealthToolsOpenAI(), ...getCalendarToolsOpenAI()]];
+      const _oaiTools = [...(searchEnabled ? [getSearchWebToolOpenAI()] : []), ...[...getHealthToolsOpenAI(), ...getCalendarToolsOpenAI()]];
       if (_oaiTools.length) body.tools = _oaiTools;
       headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
       url = useDS ? 'https://api.deepseek.com/chat/completions' : 'https://api.openai.com/v1/chat/completions';
@@ -4388,7 +4427,7 @@ async function regenerateFrom(historyIdx) {
       if (sys) oaiMessages.unshift({role:'system',content:sys});
       body={model,max_tokens:2048,stream:true};
       if (useDS) { body.thinking = { type: thinkingEnabled ? 'enabled' : 'disabled' }; if (dsTemperature !== null) body.temperature = dsTemperature; } // 讓 DS 的思考模式跟畫面上的思考開關真正連動，不然 DS 預設一律開著
-      const _oaiTools=[...(useOAI && searchEnabled ? [getSearchWebToolOpenAI()] : []), ...[...getHealthToolsOpenAI(), ...getCalendarToolsOpenAI()]];
+      const _oaiTools=[...(searchEnabled ? [getSearchWebToolOpenAI()] : []), ...[...getHealthToolsOpenAI(), ...getCalendarToolsOpenAI()]];
       if (_oaiTools.length) body.tools=_oaiTools;
       headers={'Content-Type':'application/json','Authorization':`Bearer ${key}`};
       url=useDS?'https://api.deepseek.com/chat/completions':'https://api.openai.com/v1/chat/completions';
