@@ -941,6 +941,18 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
 </div>
 
 <!-- 摘要編輯 Modal -->
+<!-- 編輯訊息 Modal（取代原本單行的瀏覽器 prompt()） -->
+<div id="edit-msg-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:200;align-items:center;justify-content:center;padding:20px">
+  <div class="modal-sheet">
+    <div class="modal-title">編輯訊息</div>
+    <textarea id="edit-msg-textarea" style="width:100%;min-height:220px;background:var(--bg);border:1px solid var(--border);border-radius:9px;padding:10px;color:var(--text);font-size:14px;line-height:1.6;resize:vertical;font-family:inherit"></textarea>
+    <div class="modal-btns" style="margin-top:12px">
+      <button class="modal-cancel" id="edit-msg-cancel">取消</button>
+      <button class="modal-confirm" id="edit-msg-confirm">確認</button>
+    </div>
+  </div>
+</div>
+
 <div id="summary-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:200;align-items:center;justify-content:center;padding:20px">
   <div class="modal-sheet">
     <!-- 步驟一：選模型 -->
@@ -1554,6 +1566,33 @@ function initHome() {
 function showChat() { initHome(); }
 
 // ── 頁面切換 ──
+// 用多行的正式 modal 取代瀏覽器內建的單行 prompt()，回傳 Promise：
+// 使用者按確認就 resolve 新文字，按取消或點背景就 resolve null（跟 prompt() 取消時回傳 null 的行為一致）。
+function showEditTextModal(initialText) {
+  return new Promise((resolve) => {
+    const modal = document.getElementById('edit-msg-modal');
+    const textarea = document.getElementById('edit-msg-textarea');
+    const confirmBtn = document.getElementById('edit-msg-confirm');
+    const cancelBtn = document.getElementById('edit-msg-cancel');
+
+    textarea.value = initialText || '';
+    modal.style.display = 'flex';
+    // 開啟時把游標移到最後、自動聚焦，方便直接接著打字
+    setTimeout(() => { textarea.focus(); textarea.selectionStart = textarea.selectionEnd = textarea.value.length; }, 0);
+
+    function cleanup(result) {
+      modal.style.display = 'none';
+      confirmBtn.removeEventListener('click', onConfirm);
+      cancelBtn.removeEventListener('click', onCancel);
+      resolve(result);
+    }
+    function onConfirm() { cleanup(textarea.value); }
+    function onCancel() { cleanup(null); }
+    confirmBtn.addEventListener('click', onConfirm);
+    cancelBtn.addEventListener('click', onCancel);
+  });
+}
+
 function switchPage(target) {
   document.querySelectorAll('.page').forEach(p => p.classList.toggle('active', p.dataset.page===target));
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.target===target));
@@ -1695,12 +1734,11 @@ async function fetchGcalEvents() {
     }
     const listData = await listRes.json();
     const rawCalendars = listData.items || [];
-    // 只讀屬於自己的行事曆：owner 權限、或系統內建（生日、假期）
+    // 只讀屬於自己的行事曆：owner 權限、或聯絡人生日（拿掉了 Google 內建的「假期」行事曆，不顯示節日）
     const calendars = rawCalendars.filter(cal => {
       if (cal.accessRole === 'owner') return true; // 自己的行事曆
-      // Google 系統行事曆的 ID 特徵
-      if (cal.id && (cal.id.includes('holiday@group.v.calendar.google.com') ||
-                     cal.id.includes('#contacts@group.v.calendar.google.com') ||
+      // Google 系統行事曆的 ID 特徵（只留生日，拿掉假期）
+      if (cal.id && (cal.id.includes('#contacts@group.v.calendar.google.com') ||
                      cal.id === 'addressbook#contacts@group.v.calendar.google.com')) return true;
       return false;
     });
@@ -2875,7 +2913,7 @@ async function editMsgMessage(idx) {
   if (!msg || msg.role !== 'user') return;
   const currentText = typeof msg.content === 'string' ? msg.content
     : (Array.isArray(msg.content) ? msg.content.filter(b => b.type === 'text').map(b => b.text).join('') : '');
-  const newText = prompt('編輯訊息：', currentText);
+  const newText = await showEditTextModal(currentText);
   if (newText === null) return; // 取消
   if (!newText.trim()) { alert('訊息不能為空'); return; }
   // 更新內容（保留原有的圖片 blocks）
@@ -4333,7 +4371,7 @@ async function editMessage(historyIdx) {
   if (!msg || msg.role !== 'user') return;
   const currentText=typeof msg.content==='string'?msg.content
     :Array.isArray(msg.content)?msg.content.filter(b=>b.type==='text').map(b=>b.text).join(''):'';
-  const newText = prompt('編輯訊息：', currentText);
+  const newText = await showEditTextModal(currentText);
   if (newText === null) return; // 取消
   if (!newText.trim()) { alert('訊息不能為空'); return; }
   // 更新內容（保留原有的圖片 blocks）
