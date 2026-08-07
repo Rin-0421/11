@@ -714,6 +714,9 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
       <textarea class="ftextarea" id="pg-gemini-img-prompt" style="min-height:72px" placeholder="給 Gemini 描述圖片內容的指令…"></textarea>
       <label class="lbl">DeepSeek 溫度（選填，0~2，留空用 DS 自己的預設值；只有思考關閉時才會生效）</label>
       <input class="finput" type="number" id="pg-ds-temp" min="0" max="2" step="0.1" placeholder="留空 = 用預設值">
+      <div style="font-size:11px;margin-top:8px;padding:8px;border-radius:8px;background:var(--surface2)">
+        上次 Gemini 呼叫結果：<span id="pg-gemini-diag" style="font-weight:600">（還沒呼叫過）</span>
+      </div>
     </div>
     <div class="card" style="max-width:none">
       <div class="card-title">角色頭像</div>
@@ -1495,10 +1498,6 @@ function updateSearchBtn() {
 }
 
 document.getElementById('search-toggle').addEventListener('click', () => {
-  const model = document.getElementById('chat-model').value;
-  if (!searchEnabled && isDeepSeek(model)) {
-    alert('DeepSeek 不支援搜尋功能。'); return;
-  }
   searchEnabled = !searchEnabled;
   updateSearchBtn(); save();
 });
@@ -1514,10 +1513,6 @@ document.getElementById('chat-model').addEventListener('change', () => {
   if (thinkingEnabled && (model==='claude-haiku-4-5-20251001' || isOpenAI(model))) {
     thinkingEnabled=false; updateThinkBtn();
     alert(isOpenAI(model) ? '已自動關閉延伸思考（OpenAI 不支援）' : '已自動關閉延伸思考（Haiku 不支援）');
-  }
-  if (searchEnabled && isDeepSeek(model)) {
-    searchEnabled=false; updateSearchBtn();
-    alert('已自動關閉搜尋（DeepSeek 不支援）');
   }
   // 存到當前對話（如果不在通知窗口）
   const conv = currentConv();
@@ -2097,7 +2092,7 @@ function getHealthTools() {
 // mediaType/base64Data 是圖片本身（跟你存在歷史紀錄裡的 Claude 格式 image block 一樣的資料）。
 // 回傳 {text, error}：text 是描述內容（失敗時是 null），error 是失敗時的實際原因（沒失敗時是 null）。
 async function fetchGeminiImageDescription(mediaType, base64Data, gKey) {
-  if (!gKey) return { text: null, error: '沒有設定 Gemini API 金鑰' };
+  if (!gKey) { setLastGeminiDiag('沒有設定 Gemini API 金鑰'); return { text: null, error: '沒有設定 Gemini API 金鑰' }; }
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 20000); // 20 秒還沒回應就放棄，避免整個對話卡死等一個請求
   try {
@@ -2121,22 +2116,39 @@ async function fetchGeminiImageDescription(mediaType, base64Data, gKey) {
     if (!res.ok) {
       const errBody = await res.text();
       console.error('Gemini 圖片描述失敗', res.status, errBody);
-      return { text: null, error: `HTTP ${res.status}：${errBody.slice(0, 200)}` };
+      const err = `HTTP ${res.status}：${errBody.slice(0, 200)}`;
+      setLastGeminiDiag(err);
+      return { text: null, error: err };
     }
     const d = await res.json();
-    const text = d.candidates?.[0]?.content?.parts?.[0]?.text || null;
-    if (!text) return { text: null, error: `回應格式異常：${JSON.stringify(d).slice(0, 200)}` };
+    // 開了搜尋工具後，回應可能拆成好幾個區塊，不能只看第一個
+    const text = d.candidates?.[0]?.content?.parts?.map(p => p.text).filter(Boolean).join('') || null;
+    if (!text) {
+      const err = `回應格式異常：${JSON.stringify(d).slice(0, 200)}`;
+      setLastGeminiDiag(err);
+      return { text: null, error: err };
+    }
+    setLastGeminiDiag('成功 ✓（' + new Date().toLocaleTimeString('zh-TW', {hour:'2-digit',minute:'2-digit'}) + '）');
     return { text, error: null };
   } catch(e) {
     if (e.name === 'AbortError') {
       console.error('Gemini 圖片描述逾時（20 秒）');
+      setLastGeminiDiag('查詢逾時（超過 20 秒沒回應）');
       return { text: null, error: '查詢逾時（超過 20 秒沒回應）' };
     }
     console.error('Gemini 圖片描述例外', e);
-    return { text: null, error: `連線例外：${e.message}` };
+    const err = `連線例外：${e.message}`;
+    setLastGeminiDiag(err);
+    return { text: null, error: err };
   } finally {
     clearTimeout(timeoutId);
   }
+}
+
+// 記錄最近一次呼叫 Gemini（不管是看圖還是搜尋）的結果，存到 localStorage，
+// 讓你可以在設定頁直接看到，不用打開瀏覽器開發者主控台（手機上根本打不開）。
+function setLastGeminiDiag(text) {
+  try { localStorage.setItem('rp_last_gemini_diag', text); } catch(e) {}
 }
 
 // 用 Gemini 搭配 Google 官方的 Grounding with Google Search 做搜尋，取代原本只給 GPT 用、
@@ -2162,16 +2174,25 @@ async function fetchGeminiSearchAnswer(query, gKey) {
     if (!res.ok) {
       const errBody = await res.text();
       console.error('Gemini 搜尋失敗', res.status, errBody);
-      return { text: null, error: `HTTP ${res.status}：${errBody.slice(0, 200)}` };
+      const err = `HTTP ${res.status}：${errBody.slice(0, 200)}`;
+      setLastGeminiDiag(err);
+      return { text: null, error: err };
     }
     const d = await res.json();
     const text = d.candidates?.[0]?.content?.parts?.map(p => p.text).filter(Boolean).join('') || null;
-    if (!text) return { text: null, error: `回應格式異常：${JSON.stringify(d).slice(0, 200)}` };
+    if (!text) {
+      const err = `回應格式異常：${JSON.stringify(d).slice(0, 200)}`;
+      setLastGeminiDiag(err);
+      return { text: null, error: err };
+    }
+    setLastGeminiDiag('成功 ✓（' + new Date().toLocaleTimeString('zh-TW', {hour:'2-digit',minute:'2-digit'}) + '）');
     return { text, error: null };
   } catch(e) {
-    if (e.name === 'AbortError') return { text: null, error: '查詢逾時（超過 20 秒沒回應）' };
+    if (e.name === 'AbortError') { setLastGeminiDiag('查詢逾時（超過 20 秒沒回應）'); return { text: null, error: '查詢逾時（超過 20 秒沒回應）' }; }
     console.error('Gemini 搜尋例外', e);
-    return { text: null, error: `連線例外：${e.message}` };
+    const err = `連線例外：${e.message}`;
+    setLastGeminiDiag(err);
+    return { text: null, error: err };
   } finally {
     clearTimeout(timeoutId);
   }
@@ -3499,10 +3520,6 @@ setTimeout(() => {
         thinkingEnabled=false; updateThinkBtn(); updateMsgThinkBtn();
         alert(isOpenAI(msgModel) ? '已自動關閉延伸思考（OpenAI 不支援）' : '已自動關閉延伸思考（Haiku 不支援）');
       }
-      if (searchEnabled && isDeepSeek(msgModel)) {
-        searchEnabled=false; updateSearchBtn(); updateMsgSearchBtn();
-        alert('已自動關閉搜尋（DeepSeek 不支援）');
-      }
       save();
     });
   }
@@ -3569,6 +3586,10 @@ document.getElementById('pg-proactive-msg').checked = proactiveMsgEnabled;
   document.getElementById('pg-gemini-key').value = geminiKey || '';
   document.getElementById('pg-gemini-img-prompt').value = geminiImgPrompt || DEFAULT_GEMINI_IMG_PROMPT;
   document.getElementById('pg-ds-temp').value = (dsTemperature === null || dsTemperature === undefined) ? '' : dsTemperature;
+  try {
+    const diagEl = document.getElementById('pg-gemini-diag');
+    if (diagEl) diagEl.textContent = localStorage.getItem('rp_last_gemini_diag') || '（還沒呼叫過）';
+  } catch(e) {}
   document.getElementById('pg-name').value = charName || '';
   document.getElementById('pg-inst').value = instText || '';
   document.getElementById('pg-inst-msg').value = instTextMsg || '';
