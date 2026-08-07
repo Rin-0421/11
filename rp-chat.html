@@ -2107,8 +2107,9 @@ async function fetchGeminiImageDescription(mediaType, base64Data, gKey) {
               { text: geminiImgPrompt },
               { inline_data: { mime_type: mediaType, data: base64Data } }
             ]
-          }],
-          tools: [{ google_search: {} }] // 需要的話（例如圖片裡是某個地標、商品）可以連網查證是什麼
+          }]
+          // 拿掉了 google_search 工具：Gemini 3.x 系列搭配搜尋 grounding 目前不穩定，常常用沒多少就 429，
+          // 看圖片這個功能本身不一定需要搜尋，先求穩定運作。
         }),
         signal: controller.signal
       }
@@ -2160,7 +2161,10 @@ async function fetchGeminiSearchAnswer(query, gKey) {
   const timeoutId = setTimeout(() => controller.abort(), 20000);
   try {
     const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${gKey}`,
+      // 注意：這裡刻意用 2.5-flash，不是 3.5-flash-lite——Gemini 3.x 系列搭配 google_search
+      // grounding 目前不穩定（Google 開發者社群 2026 年 6~7 月有多人回報，用沒多少就 429），
+      // 2.5 版本的搜尋功能比較成熟穩定。純看圖不用搜尋的話還是用 3.5-flash-lite（見上面那個函式）。
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${gKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
