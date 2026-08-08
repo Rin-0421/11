@@ -2233,10 +2233,11 @@ async function fetchGeminiSearchAnswer(query, gKey) {
   const timeoutId = setTimeout(() => controller.abort(), 20000);
   try {
     const res = await fetch(
-      // 注意：這裡刻意用 2.5-flash，不是 3.5-flash-lite——Gemini 3.x 系列搭配 google_search
-      // grounding 目前不穩定（Google 開發者社群 2026 年 6~7 月有多人回報，用沒多少就 429），
-      // 2.5 版本的搜尋功能比較成熟穩定。純看圖不用搜尋的話還是用 3.5-flash-lite（見上面那個函式）。
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${gKey}`,
+      // 2026/8 起 Google 開始把 2.5 系列對新申請的 API Key 關閉存取（回傳 404 "no longer
+      // available to new users"，即使官方文件寫的停用日期還沒到），改用 3.5 系列。
+      // 之前遇到的 429 是把 google_search 跟圖片輸入混在同一次請求裡才踩到的問題，
+      // 這裡是純文字搜尋，沒有這個組合，先試試看穩不穩定。
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${gKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
