@@ -689,6 +689,10 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
         使用狀況存取權狀態：<span id="pg-usage-access-status" style="font-weight:600">檢查中…</span>
         <button class="btn-sm" id="pg-usage-access-btn" style="margin-left:6px;padding:2px 8px;font-size:11px">前往開啟</button>
       </div>
+      <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;margin-top:4px">
+        <span style="font-size:13px">開放查詢經期紀錄</span>
+        <input type="checkbox" id="pg-period-inject" style="width:44px;height:24px;cursor:pointer">
+      </label>
     </div>
     <div class="card" style="max-width:none">
       <div class="card-title">行事曆通知</div>
@@ -697,7 +701,7 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
         <input type="checkbox" id="pg-notif-toggle" style="width:44px;height:24px;cursor:pointer">
       </label>
       <div style="font-size:11px;color:var(--text-dim);margin-top:10px;line-height:1.5">
-        開啟後，每小時 45 分會檢查一次行事曆。若未來 60 分鐘內有事件，就由 AI 用角色風格生成一則提醒。使用 DS V4 Pro 生成，不會記入對話歷史。
+        開啟後，每個整點會檢查一次。有明確時間的事件，未來 60 分鐘內開始就提醒；全天事件跟經期預測日期，固定早上 8 點提醒（經期提醒不受每日主動訊息次數上限影響）。由 AI 用角色風格生成一則提醒，使用 DS V4 Pro 生成，不會記入對話歷史，只會出現在「通知」列表裡，沒辦法在裡面回覆。
       </div>
     </div>
     <div class="card" style="max-width:none">
@@ -852,10 +856,6 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
     </div>
     <div id="fit-content">
       <details class="fit-block">
-        <summary class="fit-summary">👟 步數</summary>
-        <div class="fit-body" id="fit-steps-body"></div>
-      </details>
-      <details class="fit-block">
         <summary class="fit-summary">💤 睡眠</summary>
         <div class="fit-body" id="fit-sleep-body"></div>
       </details>
@@ -868,6 +868,20 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
           <button id="weight-add-btn" style="padding:8px 16px;border-radius:8px;border:none;background:var(--accent);color:#fff;font-size:14px;white-space:nowrap">新增</button>
         </div>
         <div id="fit-weight-body"></div>
+      </div>
+    </details>
+    <details class="fit-block" open>
+      <summary class="fit-summary">🩸 經期</summary>
+      <div class="fit-body">
+        <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--border)">
+          <span style="font-size:13px;flex:1">週期長度（天）</span>
+          <input type="number" id="period-cycle-length" min="1" max="90" step="1" style="width:64px;text-align:center;padding:6px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:14px">
+        </div>
+        <div style="display:flex;gap:8px;padding:10px 12px">
+          <input type="date" id="period-input" style="flex:1;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:14px">
+          <button id="period-add-btn" style="padding:8px 16px;border-radius:8px;border:none;background:var(--accent);color:#fff;font-size:14px;white-space:nowrap">新增</button>
+        </div>
+        <div id="fit-period-body"></div>
       </div>
     </details>
   </div>
@@ -1147,7 +1161,8 @@ function notifyNativeBusy(busy) {
   try { window.AndroidBridge?.setBusy?.(busy); } catch(e) {}
 }
 let gcalClientId = '', gcalAndroidClientId = '', gcalToken = null, gcalTokenExpiry = 0, gcalInject = false, gcalEvents = [], gcalTokenClient = null, gcalSnapshotTime = 0;
-let fitInject = false, fitData = { steps: [], sleep: [], weight: [] }, fitSnapshotTime = 0, fitTrendLastSentDate = '';
+let fitInject = false, fitData = { sleep: [], weight: [] }, fitSnapshotTime = 0, fitTrendLastSentDate = '';
+let periodInject = false, periodData = { entries: [], cycleLength: 28 };
 let locInject = false, usageInject = false;
 let proactiveConvIds = [], proactiveState = { lastCheckDate: '', dailyCounts: {} }, proactiveTimer = null;
 let notifications = [], notifEnabled = false, notifLeadMin = 10, notifCheckTimer = null, notifiedIds = new Set();
@@ -1240,11 +1255,16 @@ async function loadState() {
       fitInject = !!s.fitInject;
       locInject = !!s.locInject;
       usageInject = !!s.usageInject;
-      fitData = s.fitData || { steps: [], sleep: [], weight: [] };
+      periodInject = !!s.periodInject;
+      fitData = s.fitData || { sleep: [], weight: [] };
       if (!Array.isArray(fitData.weight)) fitData.weight = [];
       fitData.sleep = dedupSleepByDate(fitData.sleep || []);
       fitSnapshotTime = s.fitSnapshotTime || 0;
       fitTrendLastSentDate = s.fitTrendLastSentDate || '';
+      periodData = s.periodData || { entries: [], cycleLength: 28 };
+      if (!Array.isArray(periodData.entries)) periodData.entries = [];
+      if (typeof periodData.cycleLength !== 'number' || periodData.cycleLength <= 0) periodData.cycleLength = 28;
+      periodData.lastRemindedDate = periodData.lastRemindedDate || '';
       proactiveConvIds = Array.isArray(s.proactiveConvIds) ? s.proactiveConvIds : [];
       proactiveState = s.proactiveState || { lastCheckDate: '', dailyCount: 0, messagesEndTime: 0 };
       if (typeof proactiveState.dailyCount === 'undefined') proactiveState.dailyCount = 0;
@@ -1322,6 +1342,9 @@ window.navigateToProactive = function(scope, convId) {
         }, 800);
       }
     }
+  } else if (scope === 'notif') {
+    switchPage('home');
+    switchToNotifView();
   }
 };
 
@@ -1399,7 +1422,7 @@ async function save() {
     const stateForSave = {
       apiKey, dsKey, oaiKey, geminiKey, geminiImgPrompt, dsTemperature, charName, avatarB64, docs, instText, thinkingEnabled, effortLevel, searchEnabled,
       darkMode, gcalClientId, gcalAndroidClientId, gcalInject, gcalEvents, gcalSnapshotTime,
-      fitInject, fitData, fitSnapshotTime, fitTrendLastSentDate, proactiveConvIds, proactiveState,
+      fitInject, fitData, fitSnapshotTime, fitTrendLastSentDate, periodInject, periodData, proactiveConvIds, proactiveState,
       locInject, usageInject,
       notifications, notifEnabled, notifLeadMin, notifiedIds: Array.from(notifiedIds),
       instTextMsg, msgHistory, msgArchives, proactiveMsgEnabled, msgModel, proactiveHours, proactiveMaxDaily, proactiveStartHour, proactiveEndHour, compressThreshold, compressTokenThreshold,
@@ -1459,6 +1482,29 @@ async function syncPendingProactiveFromNative() {
       }
     });
   }
+
+  // 讀取背景任務產生、還沒被前景接收的「通知」提醒（行事曆事件/全天事件/經期）。
+  // 這些在背景端已經推播過系統通知了，這裡只是補進 App 裡的「通知」列表，不用再跳一次系統通知。
+  if (window.AndroidBridge.getAndClearPendingNotifications) {
+    try {
+      const pendingNotif = JSON.parse(window.AndroidBridge.getAndClearPendingNotifications() || '[]');
+      if (Array.isArray(pendingNotif) && pendingNotif.length) {
+        pendingNotif.forEach(item => {
+          if (!item.text) return;
+          notifications.push({
+            id: Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+            text: item.text,
+            _time: nowTW(),
+            meta: item.period ? { period: true } : { eventId: item.eventId, eventTitle: item.eventTitle }
+          });
+          changed = true;
+        });
+        if (notifications.length > 40) notifications.splice(0, notifications.length - 10);
+        updateNotifCount();
+      }
+    } catch(e) {}
+  }
+
   save(); // 不管有沒有新訊息，次數同步這件事本身就值得存檔
   if (changed) { renderConvList(); renderMessages(); if (typeof renderMsgPage === 'function') renderMsgPage(); }
 }
@@ -1863,27 +1909,6 @@ async function fetchFitData() {
   const endMs = nowTwMidnight + 86400000; // 明天 00:00 (台灣時間)
 
   try {
-    // 步數：按天聚合
-    const stepsRes = await fetch('https://www.googleapis.com/fitness/v1/users/me/dataset:aggregate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${gcalToken}` },
-      body: JSON.stringify({
-        aggregateBy: [{ dataTypeName: 'com.google.step_count.delta' }],
-        bucketByTime: { durationMillis: 86400000 },
-        startTimeMillis: startMs, endTimeMillis: endMs
-      })
-    });
-    console.log('[fit] steps status:', stepsRes.status);
-    if (!stepsRes.ok) { const t = await stepsRes.text(); console.error('[fit] steps err:', t); }
-    if (stepsRes.ok) {
-      const d = await stepsRes.json();
-      console.log('[fit] steps buckets:', d.bucket?.length);
-      fitData.steps = (d.bucket || []).map(b => ({
-        date: new Date(parseInt(b.startTimeMillis) + 8*3600000).toISOString().slice(0, 10),
-        value: b.dataset[0]?.point?.reduce((s, p) => s + (p.value[0]?.intVal || 0), 0) || 0
-      }));
-    }
-
     // 睡眠：session
     const sleepStart = new Date(startMs).toISOString();
     const sleepEnd = new Date(endMs).toISOString();
@@ -1920,22 +1945,12 @@ function renderFitPage() {
   const nc = document.getElementById('fit-not-connected');
   const content = document.getElementById('fit-content');
   renderWeightBody(); // 體重是手動輸入，不受 Google 連接狀態影響，永遠渲染
+  renderPeriodBody(); // 經期同樣是手動輸入，永遠渲染
   if (!nc || !content) return;
   const hasData = fitSnapshotTime > 0;
   nc.style.display = hasData ? 'none' : 'block';
   content.style.display = hasData ? 'block' : 'none';
   if (!hasData) return;
-
-  // 步數
-  const stepsBody = document.getElementById('fit-steps-body');
-  if (!fitData.steps.length) {
-    stepsBody.innerHTML = '<div class="fit-empty">沒有步數資料</div>';
-  } else {
-    stepsBody.innerHTML = fitData.steps.slice(-5).reverse().map(s => {
-      const label = new Date(s.date).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric', weekday: 'short' });
-      return `<div class="fit-row"><div class="fit-row-date">${label}</div><div class="fit-row-val">${s.value.toLocaleString()} 步</div></div>`;
-    }).join('');
-  }
 
   // 睡眠
   const sleepBody = document.getElementById('fit-sleep-body');
@@ -1992,6 +2007,51 @@ function addWeightEntry() {
 document.getElementById('weight-add-btn')?.addEventListener('click', addWeightEntry);
 document.getElementById('weight-input')?.addEventListener('keydown', e => { if (e.key === 'Enter') addWeightEntry(); });
 
+// ── 經期（手動輸入開始日期，最多保留 5 筆） ──
+function renderPeriodBody() {
+  const body = document.getElementById('fit-period-body');
+  if (!body) return;
+  const cycleInput = document.getElementById('period-cycle-length');
+  if (cycleInput && document.activeElement !== cycleInput) cycleInput.value = periodData.cycleLength;
+  if (!periodData.entries || !periodData.entries.length) {
+    body.innerHTML = '<div class="fit-empty">還沒有經期紀錄</div>';
+    return;
+  }
+  const sorted = [...periodData.entries].sort();
+  body.innerHTML = sorted.map((d, idx) => {
+    const label = new Date(d).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric', weekday: 'short' });
+    return `<div class="fit-row"><div class="fit-row-date">${label}</div><div class="fit-row-val">開始<button class="period-del-btn" data-date="${d}" style="margin-left:8px;border:none;background:none;color:var(--text-dim);cursor:pointer;font-size:12px">✕</button></div></div>`;
+  }).reverse().join('');
+  body.querySelectorAll('.period-del-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const d = btn.dataset.date;
+      periodData.entries = periodData.entries.filter(x => x !== d);
+      save();
+      renderPeriodBody();
+    });
+  });
+}
+
+function addPeriodEntry() {
+  const input = document.getElementById('period-input');
+  if (!input || !input.value) return;
+  const dateStr = input.value; // <input type="date"> 本來就是 YYYY-MM-DD 格式
+  if (!Array.isArray(periodData.entries)) periodData.entries = [];
+  if (!periodData.entries.includes(dateStr)) periodData.entries.push(dateStr);
+  periodData.entries.sort();
+  if (periodData.entries.length > 5) periodData.entries = periodData.entries.slice(-5); // 最多保留 5 筆
+  input.value = '';
+  save();
+  renderPeriodBody();
+}
+document.getElementById('period-add-btn')?.addEventListener('click', addPeriodEntry);
+document.getElementById('period-cycle-length')?.addEventListener('change', e => {
+  const v = parseInt(e.target.value, 10);
+  periodData.cycleLength = (!isNaN(v) && v > 0) ? v : 28;
+  e.target.value = periodData.cycleLength;
+  save();
+});
+
 // 每個「窗口」當天第一次發送訊息時，自動附帶一次「今天」的步數/睡眠。
 // 之後同一天內想再看健康資料，改由模型自己判斷要不要呼叫 get_today_health / get_recent_health 工具。
 function buildFitContext(conv) {
@@ -2000,10 +2060,8 @@ function buildFitContext(conv) {
   const lastSentDate = conv ? (conv.fitTrendDate || '') : fitTrendLastSentDate;
   if (lastSentDate === todayStr) return '';
 
-  const todaySteps = fitData.steps.find(s => s.date === todayStr);
   const todaySleep = fitData.sleep.find(s => s.date === todayStr);
   const parts = [];
-  if (todaySteps) parts.push(`- 今日步數：${todaySteps.value.toLocaleString()}`);
   if (todaySleep) {
     const h = Math.floor(todaySleep.durationMin / 60), m = todaySleep.durationMin % 60;
     parts.push(`- 昨晚睡眠：${todaySleep.startTime} → ${todaySleep.endTime}（${h}h${m}m）`);
@@ -2060,15 +2118,22 @@ function getHealthTools() {
     tools.push(
       {
         name: 'get_today_health',
-        description: '查詢使用者「今天」的步數、睡眠，以及最新一筆體重紀錄。',
+        description: '查詢使用者「今天」的睡眠，以及最新一筆體重紀錄。',
         input_schema: { type: 'object', properties: {} }
       },
       {
         name: 'get_recent_health',
-        description: '查詢使用者「最近 5 天（含今天）」的步數、睡眠趨勢，以及體重紀錄（最多 5 筆），可用來判斷最近作息、活動量、體重的變化。',
+        description: '查詢使用者「最近 5 天（含今天）」的睡眠趨勢，以及體重紀錄（最多 5 筆），可用來判斷最近作息、體重的變化。',
         input_schema: { type: 'object', properties: {} }
       }
     );
+  }
+  if (periodInject) {
+    tools.push({
+      name: 'get_period_status',
+      description: '查詢使用者的經期紀錄（最近 5 次開始日期、設定的週期長度、目前是週期第幾天、預測下次開始日期）。這是使用者手動輸入的資料，只有真的需要時才查，不用每次都主動提起。',
+      input_schema: { type: 'object', properties: {} }
+    });
   }
   if (locInject) {
     tools.push({
@@ -2261,7 +2326,7 @@ function getHealthToolsOpenAI() {
         type: 'function',
         function: {
           name: 'get_today_health',
-          description: '查詢使用者「今天」的步數、睡眠，以及最新一筆體重紀錄。',
+          description: '查詢使用者「今天」的睡眠，以及最新一筆體重紀錄。',
           parameters: { type: 'object', properties: {} }
         }
       },
@@ -2269,11 +2334,21 @@ function getHealthToolsOpenAI() {
         type: 'function',
         function: {
           name: 'get_recent_health',
-          description: '查詢使用者「最近 5 天（含今天）」的步數、睡眠趨勢，以及體重紀錄（最多 5 筆），可用來判斷最近作息、活動量、體重的變化。',
+          description: '查詢使用者「最近 5 天（含今天）」的睡眠趨勢，以及體重紀錄（最多 5 筆），可用來判斷最近作息、體重的變化。',
           parameters: { type: 'object', properties: {} }
         }
       }
     );
+  }
+  if (periodInject) {
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'get_period_status',
+        description: '查詢使用者的經期紀錄（最近 5 次開始日期、設定的週期長度、目前是週期第幾天、預測下次開始日期）。這是使用者手動輸入的資料，只有真的需要時才查，不用每次都主動提起。',
+        parameters: { type: 'object', properties: {} }
+      }
+    });
   }
   if (locInject) {
     tools.push({
@@ -2345,10 +2420,8 @@ async function executeHealthTool(name, input) {
     return lines.join('\n');
   }
   if (name === 'get_today_health') {
-    const todaySteps = fitData.steps.find(s => s.date === todayStr);
     const todaySleep = fitData.sleep.find(s => s.date === todayStr);
     const parts = [];
-    if (todaySteps) parts.push(`今日步數：${todaySteps.value.toLocaleString()}`);
     if (todaySleep) {
       const h = Math.floor(todaySleep.durationMin / 60), m = todaySleep.durationMin % 60;
       parts.push(`昨晚睡眠：${todaySleep.startTime} → ${todaySleep.endTime}（${h}h${m}m）`);
@@ -2357,7 +2430,7 @@ async function executeHealthTool(name, input) {
       const latest = fitData.weight[fitData.weight.length - 1];
       parts.push(`最新體重紀錄（${latest.date}）：${latest.value} kg`);
     }
-    return parts.length ? parts.join('\n') : '目前沒有今天的步數/睡眠/體重資料。';
+    return parts.length ? parts.join('\n') : '目前沒有今天的睡眠/體重資料。';
   }
   if (name === 'get_recent_health') {
     const dayLabels = ['今天','昨天','前天','大前天'];
@@ -2365,12 +2438,8 @@ async function executeHealthTool(name, input) {
       const idx = Math.round((new Date(todayStr) - new Date(dateStr)) / 86400000);
       return dayLabels[idx] || `${idx}天前`;
     };
-    const recentSteps = fitData.steps.filter(s => s.date <= todayStr).sort((a,b) => b.date.localeCompare(a.date)).slice(0, 5);
     const recentSleep = fitData.sleep.filter(s => s.date <= todayStr).sort((a,b) => b.date.localeCompare(a.date)).slice(0, 5);
     const parts = [];
-    if (recentSteps.length) {
-      parts.push('這幾天步數：' + recentSteps.map(s => `${dayLabel(s.date)} ${s.value.toLocaleString()}步`).reverse().join('、'));
-    }
     if (recentSleep.length) {
       parts.push('這幾天睡眠：' + recentSleep.map(s => {
         const h = Math.floor(s.durationMin / 60), m = s.durationMin % 60;
@@ -2380,7 +2449,23 @@ async function executeHealthTool(name, input) {
     if (fitData.weight && fitData.weight.length) {
       parts.push('體重紀錄（由舊到新，最多 5 筆）：' + fitData.weight.slice(-5).map(w => `${w.date} ${w.value}kg`).join('、'));
     }
-    return parts.length ? parts.join('\n') : '目前沒有最近幾天的步數/睡眠/體重資料。';
+    return parts.length ? parts.join('\n') : '目前沒有最近幾天的睡眠/體重資料。';
+  }
+  if (name === 'get_period_status') {
+    if (!periodData.entries || !periodData.entries.length) return '使用者目前沒有輸入過經期紀錄。';
+    const sorted = [...periodData.entries].sort();
+    const latest = sorted[sorted.length - 1];
+    const cycleDay = Math.floor((new Date(todayStr) - new Date(latest)) / 86400000) + 1;
+    const nextDate = new Date(latest);
+    nextDate.setDate(nextDate.getDate() + periodData.cycleLength);
+    const nextDateStr = nextDate.toISOString().slice(0, 10);
+    const daysUntilNext = Math.round((nextDate - new Date(todayStr)) / 86400000);
+    return [
+      `最近 ${sorted.length} 次開始日期（由舊到新）：${sorted.join('、')}`,
+      `使用者設定的週期長度：${periodData.cycleLength} 天`,
+      `距離最近一次開始，今天是週期第 ${cycleDay} 天`,
+      `預測下次開始日期：${nextDateStr}（${daysUntilNext >= 0 ? `還有 ${daysUntilNext} 天` : `已經過了 ${-daysUntilNext} 天，可能延遲或已經開始但還沒記錄`}）`
+    ].join('\n');
   }
   if (name === 'get_location') {
     try {
@@ -2698,13 +2783,9 @@ function switchToNotifView() {
   closeSidebar();
 }
 
-async function generateReminder(event) {
-  const eventTime = event.start.dateTime || event.start.date;
-  const isAllDay = !!event.start.date;
-  const timeStr = isAllDay ? '全天' : new Date(event.start.dateTime).toLocaleTimeString('zh-TW', {timeZone:'Asia/Taipei', hour:'2-digit', minute:'2-digit', hour12:false});
-  const title = event.summary || '未命名事件';
-  const location = event.location ? `（地點：${event.location}）` : '';
-  const userPrompt = `${notifLeadMin} 分鐘後有事件即將開始：\n- 時間：${timeStr}\n- 事項：${title}${location}\n\n請以角色身份，用 30-100 字的簡短適中提醒訊息通知用戶。只需告知、不要提問、不要引導對話。`;
+async function generateReminder(title, timeStr, location) {
+  const locText = location ? `（地點：${location}）` : '';
+  const userPrompt = `即將有事件：\n- 時間：${timeStr}\n- 事項：${title}${locText}\n\n請以角色身份，用 30-100 字的簡短適中提醒訊息通知用戶。只需告知、不要提問、不要引導對話。`;
 
   const sys = buildSystem();
   try {
@@ -2747,26 +2828,65 @@ function pushNotification(text, meta) {
 }
 
 async function checkAndNotify() {
-  if (!notifEnabled || !gcalEvents.length || !dsKey) return;
-  const now = Date.now();
-  const windowMs = 60 * 60 * 1000; // 檢查未來 60 分鐘
+  if (!notifEnabled || !dsKey) return;
+  const now = new Date();
+  const nowMs = now.getTime();
+  const todayStr = now.toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' });
+  const hour = now.getHours();
+
+  // ── 有明確時間的事件：檢查未來 60 分鐘內開始的 ──
+  const windowMs = 60 * 60 * 1000;
   for (const ev of gcalEvents) {
-    if (!ev.start.dateTime) continue; // 全天事件不處理
+    if (!ev.start.dateTime) continue; // 全天事件走下面那段
     const eventTs = new Date(ev.start.dateTime).getTime();
-    // 觸發條件：事件在未來 60 分鐘內，且尚未通知過
-    if (eventTs > now && eventTs - now <= windowMs && !notifiedIds.has(ev.id)) {
+    if (eventTs > nowMs && eventTs - nowMs <= windowMs && !notifiedIds.has(ev.id)) {
       notifiedIds.add(ev.id);
       save();
-      const text = await generateReminder(ev);
+      const timeStr = new Date(ev.start.dateTime).toLocaleTimeString('zh-TW', {timeZone:'Asia/Taipei', hour:'2-digit', minute:'2-digit', hour12:false});
+      const text = await generateReminder(ev.summary || '未命名事件', timeStr, ev.location);
       if (text) pushNotification(text, { eventId: ev.id, eventTitle: ev.summary });
     }
   }
-  // 清理很舊的 notifiedIds（超過 24 小時前的事件）
-  const cutoff = now - 24 * 60 * 60 * 1000;
+
+  // ── 全天事件：固定早上 8 點提醒當天的全天事件 ──
+  if (hour === 8) {
+    for (const ev of gcalEvents) {
+      if (!ev.start.date) continue; // 只處理全天事件
+      if (ev.start.date !== todayStr) continue; // 只提醒「今天」的全天事件
+      const key = `allday_${ev.id}_${todayStr}`;
+      if (notifiedIds.has(key)) continue;
+      notifiedIds.add(key);
+      save();
+      const text = await generateReminder(ev.summary || '未命名事件', '全天', ev.location);
+      if (text) pushNotification(text, { eventId: ev.id, eventTitle: ev.summary });
+    }
+
+    // ── 經期：預測日期到了，當全天事件處理，一樣固定早上 8 點提醒，不受每日主動訊息上限限制 ──
+    if (periodData.entries && periodData.entries.length) {
+      const sorted = [...periodData.entries].sort();
+      const latest = sorted[sorted.length - 1];
+      const predicted = new Date(latest);
+      predicted.setDate(predicted.getDate() + periodData.cycleLength);
+      const predictedStr = predicted.toISOString().slice(0, 10);
+      if (predictedStr === todayStr && periodData.lastRemindedDate !== todayStr) {
+        periodData.lastRemindedDate = todayStr;
+        save();
+        const text = await generateReminder('經期預計今天開始', '全天');
+        if (text) pushNotification(text, { period: true });
+      }
+    }
+  }
+
+  // 清理很舊的 notifiedIds（超過 48 小時前的，涵蓋全天事件用的日期鍵）
+  const cutoff = nowMs - 48 * 60 * 60 * 1000;
   const stillValid = new Set();
   gcalEvents.forEach(ev => {
     if (ev.start.dateTime && new Date(ev.start.dateTime).getTime() > cutoff && notifiedIds.has(ev.id)) {
       stillValid.add(ev.id);
+    }
+    if (ev.start.date) {
+      const key = `allday_${ev.id}_${todayStr}`;
+      if (notifiedIds.has(key)) stillValid.add(key);
     }
   });
   notifiedIds = stillValid;
@@ -2777,14 +2897,12 @@ function startNotifTimer() {
   if (!notifEnabled) return;
   // 立刻檢查一次
   checkAndNotify();
-  // 排程到下一個 XX:45
+  // 排程到下一個整點
   function scheduleNext() {
     const now = new Date();
     const next = new Date(now);
-    if (now.getMinutes() >= 45) {
-      next.setHours(now.getHours() + 1);
-    }
-    next.setMinutes(45);
+    next.setHours(now.getHours() + 1);
+    next.setMinutes(0);
     next.setSeconds(0);
     next.setMilliseconds(0);
     const delay = next.getTime() - now.getTime();
@@ -3584,6 +3702,7 @@ function fillSettingsPage() {
   document.getElementById('pg-fit-inject').checked = fitInject;
   document.getElementById('pg-loc-inject').checked = locInject;
   document.getElementById('pg-usage-inject').checked = usageInject;
+  document.getElementById('pg-period-inject').checked = periodInject;
   updateUsageAccessRow();
   // 對話頁主動訊息綁定會在下面
 document.getElementById('pg-proactive-msg').checked = proactiveMsgEnabled;
@@ -3674,6 +3793,10 @@ document.getElementById('pg-loc-inject').addEventListener('change', e=>{
 });
 document.getElementById('pg-usage-inject').addEventListener('change', e=>{
   usageInject = e.target.checked;
+  save();
+});
+document.getElementById('pg-period-inject').addEventListener('change', e=>{
+  periodInject = e.target.checked;
   save();
 });
 document.getElementById('pg-gcal-disconnect').addEventListener('click', ()=>{
