@@ -664,10 +664,18 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
       </div>
       <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;margin-top:4px">
         <span style="font-size:13px">送訊息時附上今日行程</span>
+        <input type="checkbox" id="pg-gcal-auto-inject" style="width:44px;height:24px;cursor:pointer">
+      </label>
+      <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;margin-top:4px">
+        <span style="font-size:13px">開放查詢行事曆（get_calendar_events 工具）</span>
         <input type="checkbox" id="pg-gcal-inject" style="width:44px;height:24px;cursor:pointer">
       </label>
       <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;margin-top:4px">
         <span style="font-size:13px">送訊息時附上健康資料</span>
+        <input type="checkbox" id="pg-fit-auto-inject" style="width:44px;height:24px;cursor:pointer">
+      </label>
+      <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;margin-top:4px">
+        <span style="font-size:13px">開放查詢健康資料（get_recent_health 工具）</span>
         <input type="checkbox" id="pg-fit-inject" style="width:44px;height:24px;cursor:pointer">
       </label>
       <button class="btn-sm" id="pg-gcal-disconnect" style="width:100%;margin-top:8px;display:none">中斷連接</button>
@@ -1163,8 +1171,8 @@ let pendingFiles = [], isLoading = false, abortCtrl = null, darkMode = false;
 function notifyNativeBusy(busy) {
   try { window.AndroidBridge?.setBusy?.(busy); } catch(e) {}
 }
-let gcalClientId = '', gcalAndroidClientId = '', gcalToken = null, gcalTokenExpiry = 0, gcalInject = false, gcalEvents = [], gcalTokenClient = null, gcalSnapshotTime = 0;
-let fitInject = false, fitData = { sleep: [], weight: [] }, fitSnapshotTime = 0, fitTrendLastSentDate = '';
+let gcalClientId = '', gcalAndroidClientId = '', gcalToken = null, gcalTokenExpiry = 0, gcalInject = false, gcalAutoInject = true, gcalEvents = [], gcalTokenClient = null, gcalSnapshotTime = 0;
+let fitInject = false, fitAutoInject = true, fitData = { sleep: [], weight: [] }, fitSnapshotTime = 0, fitTrendLastSentDate = '';
 let periodInject = false, periodData = { entries: [], cycleLength: 28 };
 let locInject = false, usageInject = false;
 let proactiveConvIds = [], proactiveState = { lastCheckDate: '', dailyCounts: {} }, proactiveTimer = null;
@@ -1252,10 +1260,25 @@ async function loadState() {
       darkMode = !!s.darkMode;
       gcalClientId = s.gcalClientId || '';
       gcalAndroidClientId = s.gcalAndroidClientId || '';
-      gcalInject = !!s.gcalInject;
+      // gcalInject / fitInject 以前身兼「自動附加」跟「工具開放」兩個功能，容易誤關工具，
+      // 這裡拆成兩個獨立變數。舊資料（沒有 gcalAutoInject 欄位）視為第一次遷移：
+      // 把原本的值當成「自動附加」的意願保留下來，工具開放這件事還原成預設開著，不讓查詢功能被誤殺。
+      if (typeof s.gcalAutoInject === 'boolean') {
+        gcalInject = !!s.gcalInject;
+        gcalAutoInject = s.gcalAutoInject;
+      } else {
+        gcalAutoInject = !!s.gcalInject;
+        gcalInject = true;
+      }
       gcalEvents = Array.isArray(s.gcalEvents) ? s.gcalEvents : [];
       gcalSnapshotTime = s.gcalSnapshotTime || 0;
-      fitInject = !!s.fitInject;
+      if (typeof s.fitAutoInject === 'boolean') {
+        fitInject = !!s.fitInject;
+        fitAutoInject = s.fitAutoInject;
+      } else {
+        fitAutoInject = !!s.fitInject;
+        fitInject = true;
+      }
       locInject = !!s.locInject;
       usageInject = !!s.usageInject;
       periodInject = !!s.periodInject;
@@ -1424,8 +1447,8 @@ async function save() {
     // 預設值，就會把錯誤的 claude-sonnet-4-6 寫回存檔，蓋掉使用者真正選的模型。
     const stateForSave = {
       apiKey, dsKey, oaiKey, geminiKey, geminiImgPrompt, dsTemperature, charName, avatarB64, docs, instText, thinkingEnabled, effortLevel, searchEnabled,
-      darkMode, gcalClientId, gcalAndroidClientId, gcalInject, gcalEvents, gcalSnapshotTime,
-      fitInject, fitData, fitSnapshotTime, fitTrendLastSentDate, periodInject, periodData, proactiveConvIds, proactiveState,
+      darkMode, gcalClientId, gcalAndroidClientId, gcalInject, gcalAutoInject, gcalEvents, gcalSnapshotTime,
+      fitInject, fitAutoInject, fitData, fitSnapshotTime, fitTrendLastSentDate, periodInject, periodData, proactiveConvIds, proactiveState,
       locInject, usageInject,
       notifications, notifEnabled, notifLeadMin, notifiedIds: Array.from(notifiedIds),
       instTextMsg, msgHistory, msgArchives, proactiveMsgEnabled, msgModel, proactiveHours, proactiveMaxDaily, proactiveStartHour, proactiveEndHour, compressThreshold, compressTokenThreshold,
@@ -1870,7 +1893,7 @@ function renderGcalPage() {
 
 function buildGcalContext() {
   // 給 API 用的今日行程摘要
-  if (!gcalInject || !gcalEvents.length) return '';
+  if (!gcalAutoInject || !gcalEvents.length) return '';
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' }); // 用台灣時區算今天，不要用 UTC（toISOString 在凌晨 0~8 點會判斷成前一天）
   const todayEvents = gcalEvents.filter(ev => {
     const d = ev.start.dateTime || ev.start.date;
@@ -2058,7 +2081,7 @@ document.getElementById('period-cycle-length')?.addEventListener('change', e => 
 // 每個「窗口」當天第一次發送訊息時，自動附帶一次「今天」的步數/睡眠。
 // 之後同一天內想再看健康資料，改由模型自己判斷要不要呼叫 get_recent_health 工具。
 function buildFitContext(conv) {
-  if (!fitInject) return '';
+  if (!fitAutoInject) return '';
   const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' }); // 用台灣時區算今天，不要用 UTC（toISOString 在凌晨 0~8 點會判斷成前一天）
   const lastSentDate = conv ? (conv.fitTrendDate || '') : fitTrendLastSentDate;
   if (lastSentDate === todayStr) return '';
@@ -3673,9 +3696,11 @@ function fillSettingsPage() {
   updateBatteryStatus();
   updateLastBgRun();
   document.getElementById('pg-gcal-inject').checked = gcalInject;
+  document.getElementById('pg-gcal-auto-inject').checked = gcalAutoInject;
   document.getElementById('pg-gcal-disconnect').style.display = gcalToken ? 'block' : 'none';
   document.getElementById('pg-notif-toggle').checked = notifEnabled;
   document.getElementById('pg-fit-inject').checked = fitInject;
+  document.getElementById('pg-fit-auto-inject').checked = fitAutoInject;
   document.getElementById('pg-loc-inject').checked = locInject;
   document.getElementById('pg-usage-inject').checked = usageInject;
   document.getElementById('pg-period-inject').checked = periodInject;
@@ -3772,8 +3797,16 @@ document.getElementById('pg-gcal-inject').addEventListener('change', e=>{
   gcalInject = e.target.checked;
   save();
 });
+document.getElementById('pg-gcal-auto-inject').addEventListener('change', e=>{
+  gcalAutoInject = e.target.checked;
+  save();
+});
 document.getElementById('pg-fit-inject').addEventListener('change', e=>{
   fitInject = e.target.checked;
+  save();
+});
+document.getElementById('pg-fit-auto-inject').addEventListener('change', e=>{
+  fitAutoInject = e.target.checked;
   save();
 });
 document.getElementById('pg-loc-inject').addEventListener('change', e=>{
