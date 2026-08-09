@@ -643,6 +643,13 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
   </div>
   <div class="page-body" id="settings-page-body">
     <div class="card" style="max-width:none">
+      <div class="card-title">網頁版本</div>
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:8px;line-height:1.5">
+        App 不會自動抓最新版的 rp-chat.html 了（原本每次切回前景都會自動重整，但會把你捲動的位置沖掉），想更新的話按這個按鈕。
+      </div>
+      <button class="btn-sm" id="pg-reload-btn" style="width:100%">🔄 重新整理網頁（抓最新版本）</button>
+    </div>
+    <div class="card" style="max-width:none">
       <div class="card-title">外觀</div>
       <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer">
         <span style="font-size:14px">深色模式</span>
@@ -656,26 +663,18 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
         <input class="finput" type="text" id="pg-gcal-cid" placeholder="xxxxx.apps.googleusercontent.com" autocomplete="off" spellcheck="false">
       </div>
       <div id="pg-gcal-android-row" style="display:none">
-        <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px">原生殼直接用套件簽章跟 Google 驗證身份，不需要在這裡填 Client ID（但你要先在 Google Cloud Console 建過對應的 Android OAuth 用戶端）。</div>
         <div style="font-size:11px;padding:8px;border-radius:8px;background:var(--surface2)">
           連接狀態：<span id="pg-gcal-android-status" style="font-weight:600">檢查中…</span>
           <button class="btn-sm" id="pg-gcal-android-connect-btn" style="margin-left:6px;padding:2px 8px;font-size:11px">連接</button>
         </div>
       </div>
+      <div class="sh-sec" style="margin-top:10px">工具</div>
       <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;margin-top:4px">
-        <span style="font-size:13px">送訊息時附上今日行程</span>
-        <input type="checkbox" id="pg-gcal-auto-inject" style="width:44px;height:24px;cursor:pointer">
-      </label>
-      <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;margin-top:4px">
-        <span style="font-size:13px">開放查詢行事曆（get_calendar_events 工具）</span>
+        <span style="font-size:13px">開放 get_calendar_events</span>
         <input type="checkbox" id="pg-gcal-inject" style="width:44px;height:24px;cursor:pointer">
       </label>
       <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;margin-top:4px">
-        <span style="font-size:13px">送訊息時附上健康資料</span>
-        <input type="checkbox" id="pg-fit-auto-inject" style="width:44px;height:24px;cursor:pointer">
-      </label>
-      <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;margin-top:4px">
-        <span style="font-size:13px">開放查詢健康資料（get_recent_health 工具）</span>
+        <span style="font-size:13px">開放 get_recent_health</span>
         <input type="checkbox" id="pg-fit-inject" style="width:44px;height:24px;cursor:pointer">
       </label>
       <button class="btn-sm" id="pg-gcal-disconnect" style="width:100%;margin-top:8px;display:none">中斷連接</button>
@@ -718,8 +717,6 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
       <input class="finput" type="password" id="pg-claude-key" placeholder="sk-ant-api03-…" autocomplete="off">
       <label class="lbl">DeepSeek（選填）</label>
       <input class="finput" type="password" id="pg-ds-key" placeholder="sk-…" autocomplete="off">
-      <label class="lbl">OpenAI（選填，目前選單裡沒有 GPT 模型可選，留著也沒差）</label>
-      <input class="finput" type="password" id="pg-oai-key" placeholder="sk-…" autocomplete="off">
       <label class="lbl">Google Gemini（選填，讓 DeepSeek 看得懂圖片用）</label>
       <input class="finput" type="password" id="pg-gemini-key" placeholder="AIza…" autocomplete="off">
       <label class="lbl">Gemini 描述圖片時的指令（可自訂）</label>
@@ -1314,6 +1311,12 @@ async function loadState() {
       currentConvId = s.currentConvId || null;
       globalSavedModel = s.model || 'claude-sonnet-4-6';
     }
+    // 一次性自我修復：主動訊息勾選清單裡，如果有對話已經被刪除卻還殘留在清單裡，這裡清掉
+    // （之前刪除對話時沒有同步移除，可能留下背景檢查一直撲空的殘留 ID）
+    if (Array.isArray(proactiveConvIds) && proactiveConvIds.length) {
+      const validIds = new Set(conversations.map(c => c.id));
+      proactiveConvIds = proactiveConvIds.filter(id => validIds.has(id));
+    }
     if (!conversations.length) conversations.push({ id: uid(), name: '對話 1', history: [], model: globalSavedModel });
     if (!currentConvId || !conversations.find(c=>c.id===currentConvId))
       currentConvId = conversations[0].id;
@@ -1892,6 +1895,12 @@ function renderGcalPage() {
 }
 
 function buildGcalContext() {
+  // 自動附加今日行程這個功能已經拿掉了（使用者覺得容易被誤認成在跟自己說話），
+  // 保留這個函式簽名不動，只是永遠回傳空字串，不用改動下面一堆呼叫端。
+  // 行事曆資料本身還在，透過 get_calendar_events 工具查詢，不受影響。
+  return '';
+}
+function _unusedBuildGcalContext() {
   // 給 API 用的今日行程摘要
   if (!gcalAutoInject || !gcalEvents.length) return '';
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' }); // 用台灣時區算今天，不要用 UTC（toISOString 在凌晨 0~8 點會判斷成前一天）
@@ -2078,9 +2087,11 @@ document.getElementById('period-cycle-length')?.addEventListener('change', e => 
   save();
 });
 
-// 每個「窗口」當天第一次發送訊息時，自動附帶一次「今天」的步數/睡眠。
-// 之後同一天內想再看健康資料，改由模型自己判斷要不要呼叫 get_recent_health 工具。
+// 自動附加健康資料這個功能已經拿掉了，函式永遠回傳空字串，健康資料本身透過 get_recent_health 工具查詢。
 function buildFitContext(conv) {
+  return '';
+}
+function _unusedBuildFitContext(conv) {
   if (!fitAutoInject) return '';
   const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' }); // 用台灣時區算今天，不要用 UTC（toISOString 在凌晨 0~8 點會判斷成前一天）
   const lastSentDate = conv ? (conv.fitTrendDate || '') : fitTrendLastSentDate;
@@ -3696,11 +3707,9 @@ function fillSettingsPage() {
   updateBatteryStatus();
   updateLastBgRun();
   document.getElementById('pg-gcal-inject').checked = gcalInject;
-  document.getElementById('pg-gcal-auto-inject').checked = gcalAutoInject;
   document.getElementById('pg-gcal-disconnect').style.display = gcalToken ? 'block' : 'none';
   document.getElementById('pg-notif-toggle').checked = notifEnabled;
   document.getElementById('pg-fit-inject').checked = fitInject;
-  document.getElementById('pg-fit-auto-inject').checked = fitAutoInject;
   document.getElementById('pg-loc-inject').checked = locInject;
   document.getElementById('pg-usage-inject').checked = usageInject;
   document.getElementById('pg-period-inject').checked = periodInject;
@@ -3729,7 +3738,6 @@ document.getElementById('pg-proactive-msg').checked = proactiveMsgEnabled;
   renderProactiveList();
   document.getElementById('pg-claude-key').value = apiKey || '';
   document.getElementById('pg-ds-key').value = dsKey || '';
-  document.getElementById('pg-oai-key').value = oaiKey || '';
   document.getElementById('pg-gemini-key').value = geminiKey || '';
   document.getElementById('pg-gemini-img-prompt').value = geminiImgPrompt || DEFAULT_GEMINI_IMG_PROMPT;
   document.getElementById('pg-ds-temp').value = (dsTemperature === null || dsTemperature === undefined) ? '' : dsTemperature;
@@ -3781,6 +3789,9 @@ document.getElementById('pg-gcal-android-connect-btn')?.addEventListener('click'
 bindAv('pg-av-btn','pg-av-upload-btn','pg-av-file','pg-av-img','pg-av-ph');
 
 // 深色模式開關
+document.getElementById('pg-reload-btn').addEventListener('click', () => {
+  location.reload();
+});
 document.getElementById('pg-dark-toggle').addEventListener('change', e=>{
   darkMode = e.target.checked;
   applyDarkMode();
@@ -3797,16 +3808,8 @@ document.getElementById('pg-gcal-inject').addEventListener('change', e=>{
   gcalInject = e.target.checked;
   save();
 });
-document.getElementById('pg-gcal-auto-inject').addEventListener('change', e=>{
-  gcalAutoInject = e.target.checked;
-  save();
-});
 document.getElementById('pg-fit-inject').addEventListener('change', e=>{
   fitInject = e.target.checked;
-  save();
-});
-document.getElementById('pg-fit-auto-inject').addEventListener('change', e=>{
-  fitAutoInject = e.target.checked;
   save();
 });
 document.getElementById('pg-loc-inject').addEventListener('change', e=>{
@@ -3914,12 +3917,11 @@ document.getElementById('cal-refresh-btn').addEventListener('click', async ()=>{
 function doSaveSettings() {
   const ck=document.getElementById('pg-claude-key').value.trim();
   const dk=document.getElementById('pg-ds-key').value.trim();
-  const ok=document.getElementById('pg-oai-key').value.trim();
   const gk=document.getElementById('pg-gemini-key').value.trim();
   const gip=document.getElementById('pg-gemini-img-prompt').value.trim();
   const dtRaw = document.getElementById('pg-ds-temp').value.trim();
   const dt = dtRaw === '' ? null : parseFloat(dtRaw);
-  apiKey = ck; dsKey = dk; oaiKey = ok; geminiKey = gk; geminiImgPrompt = gip || DEFAULT_GEMINI_IMG_PROMPT;
+  apiKey = ck; dsKey = dk; geminiKey = gk; geminiImgPrompt = gip || DEFAULT_GEMINI_IMG_PROMPT;
   dsTemperature = (dt !== null && !isNaN(dt) && dt >= 0 && dt <= 2) ? dt : null;
   charName=document.getElementById('pg-name').value.trim()||'角色';
   instText=document.getElementById('pg-inst').value.trim();
@@ -4023,6 +4025,11 @@ function renderConvList() {
       if (!confirm(`確定刪除「${conv.name}」？`)) return;
       const idx = conversations.findIndex(c=>c.id===conv.id);
       conversations.splice(idx,1);
+      // 一併從主動訊息的勾選清單移除，不然背景檢查會一直對著已刪除的對話撲空
+      if (Array.isArray(proactiveConvIds)) {
+        const pIdx = proactiveConvIds.indexOf(conv.id);
+        if (pIdx >= 0) proactiveConvIds.splice(pIdx, 1);
+      }
       if (currentConvId===conv.id) {
         currentConvId=conversations[Math.max(0,idx-1)].id;
         renderMessages();
