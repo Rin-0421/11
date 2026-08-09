@@ -763,6 +763,9 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
         <span style="font-size:13px;font-weight:600">則數防呆保底（用量還沒讀到資料時才會用到）</span>
         <input type="number" id="pg-compress-threshold" min="11" max="1000" step="1" style="width:64px;text-align:center;padding:4px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:inherit">
       </label>
+      <div style="font-size:11px;margin-top:8px;padding:8px;border-radius:8px;background:var(--surface2)">
+        目前選取對話追蹤到的用量：<span id="pg-current-tokens" style="font-weight:600">（尚未選取對話或還沒有資料）</span>
+      </div>
     </div>
     <div class="card" style="max-width:none">
       <div class="card-title">聊天指令</div>
@@ -3711,6 +3714,19 @@ document.getElementById('pg-proactive-msg').checked = proactiveMsgEnabled;
   document.getElementById('pg-proactive-end-hour').value = proactiveEndHour;
   document.getElementById('pg-proactive-hours').value = proactiveHours;
   document.getElementById('pg-compress-token-threshold').value = compressTokenThreshold;
+  {
+    const tokEl = document.getElementById('pg-current-tokens');
+    const cv = conversations.find(c => c.id === currentConvId);
+    if (tokEl) {
+      if (cv && cv.lastKnownTokens) {
+        tokEl.textContent = `${cv.lastKnownTokens.toLocaleString()} token（對話：${cv.name}）`;
+      } else if (cv) {
+        tokEl.textContent = `還沒有真實用量資料（對話：${cv.name}，可能是壓縮過剛歸零，或還沒送出過訊息）`;
+      } else {
+        tokEl.textContent = '（尚未選取對話或還沒有資料）';
+      }
+    }
+  }
   document.getElementById('pg-compress-threshold').value = compressThreshold;
   document.getElementById('pg-proactive-max-daily').value = proactiveMaxDaily;
   renderProactiveList();
@@ -4925,6 +4941,21 @@ async function runOpenAIWithToolsNonStream(initialMessages, body, headers, url) 
 
 function escHtml(t) { return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
+// 匯出檔案共用：原生殼裡 <a download> 那招沒有反應（WebView 沒有內建處理 blob 下載的機制），
+// 優先透過橋接直接請原生端把內容寫進「下載」資料夾；一般瀏覽器/PWA 沒有這個橋接，就照舊用瀏覽器下載。
+function downloadFile(filename, content, mimeType) {
+  if (window.AndroidBridge && window.AndroidBridge.saveFile) {
+    try {
+      const ok = window.AndroidBridge.saveFile(filename, content);
+      if (ok) return;
+    } catch(e) { console.error('saveFile 失敗', e); }
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([content], { type: mimeType || 'application/json' }));
+  a.download = filename;
+  a.click();
+}
+
 // ── Settings ──
 function openSettings() {
   document.getElementById('set-claude-key').value=apiKey;
@@ -5019,10 +5050,7 @@ document.getElementById('export-confirm').addEventListener('click', () => {
     }
   });
   const data = JSON.stringify(payload, null, 2);
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([data], { type: 'application/json' }));
-  a.download = `rp-export-${Date.now()}.json`;
-  a.click();
+  downloadFile(`rp-export-${Date.now()}.json`, data, 'application/json');
   document.getElementById('export-modal').style.display = 'none';
 });
 document.getElementById('export-btn').addEventListener('click', exportConv);
