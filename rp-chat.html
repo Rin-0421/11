@@ -1871,7 +1871,7 @@ function renderGcalPage() {
 function buildGcalContext() {
   // 給 API 用的今日行程摘要
   if (!gcalInject || !gcalEvents.length) return '';
-  const today = new Date().toISOString().slice(0, 10);
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' }); // 用台灣時區算今天，不要用 UTC（toISOString 在凌晨 0~8 點會判斷成前一天）
   const todayEvents = gcalEvents.filter(ev => {
     const d = ev.start.dateTime || ev.start.date;
     return d.slice(0, 10) === today;
@@ -1996,7 +1996,7 @@ function addWeightEntry() {
   const val = parseFloat(input.value);
   if (!val || val <= 0) return;
   if (!Array.isArray(fitData.weight)) fitData.weight = [];
-  const dateStr = new Date().toISOString().slice(0, 10);
+  const dateStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' }); // 用台灣時區算今天，不要用 UTC（toISOString 在凌晨 0~8 點會判斷成前一天）
   // 同一天重複輸入就覆蓋掉，而不是塞好幾筆進去
   const existingIdx = fitData.weight.findIndex(w => w.date === dateStr);
   if (existingIdx >= 0) fitData.weight[existingIdx] = { date: dateStr, value: val };
@@ -2056,10 +2056,10 @@ document.getElementById('period-cycle-length')?.addEventListener('change', e => 
 });
 
 // 每個「窗口」當天第一次發送訊息時，自動附帶一次「今天」的步數/睡眠。
-// 之後同一天內想再看健康資料，改由模型自己判斷要不要呼叫 get_today_health / get_recent_health 工具。
+// 之後同一天內想再看健康資料，改由模型自己判斷要不要呼叫 get_recent_health 工具。
 function buildFitContext(conv) {
   if (!fitInject) return '';
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' }); // 用台灣時區算今天，不要用 UTC（toISOString 在凌晨 0~8 點會判斷成前一天）
   const lastSentDate = conv ? (conv.fitTrendDate || '') : fitTrendLastSentDate;
   if (lastSentDate === todayStr) return '';
 
@@ -2073,7 +2073,7 @@ function buildFitContext(conv) {
 
   if (conv) conv.fitTrendDate = todayStr; else fitTrendLastSentDate = todayStr;
   save();
-  return `[健康]\n${parts.join('\n')}\n（如需更完整的健康資訊，可以呼叫 get_today_health 或 get_recent_health 工具查詢，不需要主動提起也可以）\n[結束]`;
+  return `[健康]\n${parts.join('\n')}\n（如需更完整的健康資訊，可以呼叫 get_recent_health 工具查詢，不需要主動提起也可以）\n[結束]`;
 }
 
 // 供模型自己選擇調用的健康資料工具
@@ -2083,14 +2083,13 @@ function getCalendarTools() {
   if (!gcalInject) return [];
   return [{
     name: 'get_calendar_events',
-    description: '查詢使用者行事曆上某天或某段時間範圍內的事件（目前只有未來 30 天內的資料）。start_date 必填，end_date 不填就只查 start_date 那一天。',
+    description: '查詢使用者行事曆上某段時間範圍內的事件（資料範圍最多到未來 30 天）。start_date/end_date 都不填時，預設查「今天起未來 7 天」。想查更久之後的話，end_date 最多可以填到今天起 30 天內。',
     input_schema: {
       type: 'object',
       properties: {
-        start_date: { type: 'string', description: '查詢起始日期，格式 YYYY-MM-DD' },
-        end_date: { type: 'string', description: '查詢結束日期（含當天），格式 YYYY-MM-DD，不填就只查 start_date 那一天' }
-      },
-      required: ['start_date']
+        start_date: { type: 'string', description: '查詢起始日期，格式 YYYY-MM-DD，不填預設是今天' },
+        end_date: { type: 'string', description: '查詢結束日期（含當天），格式 YYYY-MM-DD，不填預設是 start_date 起算的 7 天後（最多可填到今天起 30 天內，超過查不到資料）' }
+      }
     }
   }];
 }
@@ -2102,14 +2101,13 @@ function getCalendarToolsOpenAI() {
     type: 'function',
     function: {
       name: 'get_calendar_events',
-      description: '查詢使用者行事曆上某天或某段時間範圍內的事件（目前只有未來 30 天內的資料）。start_date 必填，end_date 不填就只查 start_date 那一天。',
+      description: '查詢使用者行事曆上某段時間範圍內的事件（資料範圍最多到未來 30 天）。start_date/end_date 都不填時，預設查「今天起未來 7 天」。想查更久之後的話，end_date 最多可以填到今天起 30 天內。',
       parameters: {
         type: 'object',
         properties: {
-          start_date: { type: 'string', description: '查詢起始日期，格式 YYYY-MM-DD' },
-          end_date: { type: 'string', description: '查詢結束日期（含當天），格式 YYYY-MM-DD，不填就只查 start_date 那一天' }
-        },
-        required: ['start_date']
+          start_date: { type: 'string', description: '查詢起始日期，格式 YYYY-MM-DD，不填預設是今天' },
+          end_date: { type: 'string', description: '查詢結束日期（含當天），格式 YYYY-MM-DD，不填預設是 start_date 起算的 7 天後（最多可填到今天起 30 天內，超過查不到資料）' }
+        }
       }
     }
   }];
@@ -2118,18 +2116,11 @@ function getCalendarToolsOpenAI() {
 function getHealthTools() {
   const tools = [];
   if (fitInject) {
-    tools.push(
-      {
-        name: 'get_today_health',
-        description: '查詢使用者「今天」的睡眠，以及最新一筆體重紀錄。',
-        input_schema: { type: 'object', properties: {} }
-      },
-      {
-        name: 'get_recent_health',
-        description: '查詢使用者「最近 5 天（含今天）」的睡眠趨勢，以及體重紀錄（最多 5 筆），可用來判斷最近作息、體重的變化。',
-        input_schema: { type: 'object', properties: {} }
-      }
-    );
+    tools.push({
+      name: 'get_recent_health',
+      description: '查詢使用者「最近 5 天（含今天）」的睡眠趨勢，以及體重紀錄（最多 5 筆），可用來判斷最近作息、體重的變化。',
+      input_schema: { type: 'object', properties: {} }
+    });
   }
   if (periodInject) {
     tools.push({
@@ -2325,24 +2316,14 @@ function getSearchWebToolOpenAI() {
 function getHealthToolsOpenAI() {
   const tools = [];
   if (fitInject) {
-    tools.push(
-      {
-        type: 'function',
-        function: {
-          name: 'get_today_health',
-          description: '查詢使用者「今天」的睡眠，以及最新一筆體重紀錄。',
-          parameters: { type: 'object', properties: {} }
-        }
-      },
-      {
-        type: 'function',
-        function: {
-          name: 'get_recent_health',
-          description: '查詢使用者「最近 5 天（含今天）」的睡眠趨勢，以及體重紀錄（最多 5 筆），可用來判斷最近作息、體重的變化。',
-          parameters: { type: 'object', properties: {} }
-        }
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'get_recent_health',
+        description: '查詢使用者「最近 5 天（含今天）」的睡眠趨勢，以及體重紀錄（最多 5 筆），可用來判斷最近作息、體重的變化。',
+        parameters: { type: 'object', properties: {} }
       }
-    );
+    });
   }
   if (periodInject) {
     tools.push({
@@ -2395,22 +2376,25 @@ function getBrowserLocation() {
 // 實際執行健康/定位/使用情況工具查詢，回傳給模型的文字內容。input 是模型呼叫工具時附帶的參數（可能是 {}）。
 async function executeHealthTool(name, input) {
   input = input || {};
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' }); // 用台灣時區算今天，不要用 UTC（toISOString 在凌晨 0~8 點會判斷成前一天）
   if (name === 'search_web') {
     if (!input.query) return '沒有提供查詢內容。';
     const { text: result, error: searchErr } = await fetchGeminiSearchAnswer(input.query, geminiKey);
     return result || `搜尋失敗：${searchErr || '未知錯誤'}`;
   }
   if (name === 'get_calendar_events') {
-    if (!input.start_date) return '沒有提供查詢的起始日期。';
-    const startD = input.start_date;
-    const endD = input.end_date || input.start_date;
+    const startD = input.start_date || todayStr;
+    const endD = input.end_date || (() => {
+      const d = new Date(startD);
+      d.setDate(d.getDate() + 6);
+      return d.toISOString().slice(0, 10);
+    })();
     if (!gcalEvents.length) return '目前沒有行事曆資料（可能還沒連接 Google 帳號，或最近沒有重新整理過）。';
     const matched = gcalEvents.filter(ev => {
       const d = (ev.start.dateTime || ev.start.date).slice(0, 10);
       return d >= startD && d <= endD;
     });
-    if (!matched.length) return `${startD}${endD !== startD ? ' ~ ' + endD : ''} 沒有查到任何行程。`;
+    if (!matched.length) return `${startD} ~ ${endD} 沒有查到任何行程（這是真實查詢結果，資料範圍只到未來 30 天內，超過範圍或真的沒排行程都會是空的）。`;
     // 依日期分組，每天底下列出當天事件
     const byDate = {};
     matched.forEach(ev => {
@@ -2423,19 +2407,6 @@ async function executeHealthTool(name, input) {
     const lines = Object.keys(byDate).sort().map(d => `${d}\n` + byDate[d].map(l => `  - ${l}`).join('\n'));
     return lines.join('\n');
   }
-  if (name === 'get_today_health') {
-    const todaySleep = fitData.sleep.find(s => s.date === todayStr);
-    const parts = [];
-    if (todaySleep) {
-      const h = Math.floor(todaySleep.durationMin / 60), m = todaySleep.durationMin % 60;
-      parts.push(`昨晚睡眠：${todaySleep.startTime} → ${todaySleep.endTime}（${h}h${m}m）`);
-    }
-    if (fitData.weight && fitData.weight.length) {
-      const latest = fitData.weight[fitData.weight.length - 1];
-      parts.push(`最新體重紀錄（${latest.date}）：${latest.value} kg`);
-    }
-    return parts.length ? parts.join('\n') : '目前沒有今天的睡眠/體重資料。';
-  }
   if (name === 'get_recent_health') {
     const dayLabels = ['今天','昨天','前天','大前天'];
     const dayLabel = (dateStr) => {
@@ -2445,15 +2416,15 @@ async function executeHealthTool(name, input) {
     const recentSleep = fitData.sleep.filter(s => s.date <= todayStr).sort((a,b) => b.date.localeCompare(a.date)).slice(0, 5);
     const parts = [];
     if (recentSleep.length) {
-      parts.push('這幾天睡眠：' + recentSleep.map(s => {
+      parts.push('這幾天睡眠（真實資料）：' + recentSleep.map(s => {
         const h = Math.floor(s.durationMin / 60), m = s.durationMin % 60;
         return `${dayLabel(s.date)} ${h}h${m}m`;
       }).reverse().join('、'));
     }
     if (fitData.weight && fitData.weight.length) {
-      parts.push('體重紀錄（由舊到新，最多 5 筆）：' + fitData.weight.slice(-5).map(w => `${w.date} ${w.value}kg`).join('、'));
+      parts.push('體重紀錄（真實資料，由舊到新，最多 5 筆）：' + fitData.weight.slice(-5).map(w => `${w.date} ${w.value}kg`).join('、'));
     }
-    return parts.length ? parts.join('\n') : '目前沒有最近幾天的睡眠/體重資料。';
+    return parts.length ? parts.join('\n') : '目前沒有最近幾天的睡眠/體重資料（這是真實查詢結果，可能是還沒連接 Google Fit，或這幾天沒有睡眠紀錄；體重是純手動輸入，還沒輸入過就會是空的）。';
   }
   if (name === 'get_period_status') {
     if (!periodData.entries || !periodData.entries.length) return '使用者目前沒有輸入過經期紀錄。';
@@ -2496,12 +2467,13 @@ async function executeHealthTool(name, input) {
     }
     try {
       const list = JSON.parse(window.AndroidBridge.getUsageStats(hours) || '[]');
-      if (!list.length) return `最近 ${hours} 小時沒有偵測到明顯的 App 使用紀錄。`;
+      if (!list.length) return `最近 ${hours} 小時沒有偵測到明顯的 App 使用紀錄。這是真實查詢結果，即使清單是空的也不可以自己編幾個 App 名稱湊數。`;
       const lines = list.slice(0, 8).map(x => {
         const mins = Math.round(x.totalMs / 60000);
         return `${x.label || x.package}：約 ${mins} 分鐘`;
       });
-      return `最近 ${hours} 小時使用情況（依時長排序，只列前幾名）：\n` + lines.join('\n');
+      const warning = list.length < 3 ? `\n（以上是真實查詢到的全部結果，總共只有 ${list.length} 個，即使覺得清單很短也不可以自己再加其他 App 名稱進去，沒查到的就是沒有。）` : '';
+      return `最近 ${hours} 小時使用情況（依時長排序，只列前幾名，以下都是真實資料）：\n` + lines.join('\n') + warning;
     } catch(e) {
       return '讀取使用情況時發生錯誤。';
     }
