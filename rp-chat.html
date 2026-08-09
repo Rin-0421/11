@@ -2389,7 +2389,7 @@ async function executeHealthTool(name, input) {
       d.setDate(d.getDate() + 6);
       return d.toISOString().slice(0, 10);
     })();
-    if (!gcalEvents.length) return '目前沒有行事曆資料（可能還沒連接 Google 帳號，或最近沒有重新整理過）。';
+    if (!gcalEvents.length) return `目前沒有行事曆資料（gcalEvents 陣列長度：0，上次快照時間：${gcalSnapshotTime ? new Date(gcalSnapshotTime).toLocaleString('zh-TW') : '從來沒有'}）。可能還沒連接 Google 帳號，或最近沒有重新整理過。`;
     const matched = gcalEvents.filter(ev => {
       const d = (ev.start.dateTime || ev.start.date).slice(0, 10);
       return d >= startD && d <= endD;
@@ -2424,7 +2424,7 @@ async function executeHealthTool(name, input) {
     if (fitData.weight && fitData.weight.length) {
       parts.push('體重紀錄（真實資料，由舊到新，最多 5 筆）：' + fitData.weight.slice(-5).map(w => `${w.date} ${w.value}kg`).join('、'));
     }
-    return parts.length ? parts.join('\n') : '目前沒有最近幾天的睡眠/體重資料（這是真實查詢結果，可能是還沒連接 Google Fit，或這幾天沒有睡眠紀錄；體重是純手動輸入，還沒輸入過就會是空的）。';
+    return parts.length ? parts.join('\n') : `目前沒有最近幾天的睡眠/體重資料（睡眠陣列長度：${fitData.sleep.length}，體重陣列長度：${(fitData.weight||[]).length}，上次健康資料快照時間：${fitSnapshotTime ? new Date(fitSnapshotTime).toLocaleString('zh-TW') : '從來沒有'}）。這是真實查詢結果，可能是還沒連接 Google Fit，或這幾天沒有睡眠紀錄；體重是純手動輸入，還沒輸入過就會是空的。`;
   }
   if (name === 'get_period_status') {
     if (!periodData.entries || !periodData.entries.length) return '使用者目前沒有輸入過經期紀錄。';
