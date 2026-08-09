@@ -3619,7 +3619,7 @@ setTimeout(() => {
         const isPdf = f.type === 'application/pdf', isImg = f.type.startsWith('image/');
         if (!isPdf && !isImg) return null;
         const b64promise = isImg ? compressImage(f) : toB64(f);
-        return b64promise.then(b64 => ({type:isPdf?'pdf':'image',mime:isPdf?f.type:'image/jpeg',data:b64.split(',')[1],src:b64,name:f.name}));
+        return b64promise.then(b64 => ({type:isPdf?'pdf':'image',mime:isPdf?f.type:(b64.match(/^data:(.*?);/)?.[1]||'image/jpeg'),data:b64.split(',')[1],src:b64,name:f.name}));
       })).then(results => {
         results.filter(Boolean).forEach(pf => msgPendingFiles.push(pf));
         renderMsgFilePreview();
@@ -4279,7 +4279,7 @@ document.getElementById('file-input').addEventListener('change', e => {
     const isPdf=f.type==='application/pdf', isImg=f.type.startsWith('image/');
     if(!isPdf&&!isImg) return null;
     const b64promise = isImg ? compressImage(f) : toB64(f);
-    return b64promise.then(b64=>({type:isPdf?'pdf':'image',mime:isPdf?f.type:'image/jpeg',data:b64.split(',')[1],src:b64,name:f.name}));
+    return b64promise.then(b64=>({type:isPdf?'pdf':'image',mime:isPdf?f.type:(b64.match(/^data:(.*?);/)?.[1]||'image/jpeg'),data:b64.split(',')[1],src:b64,name:f.name}));
   })).then(results=>{
     results.filter(Boolean).forEach(pf=>pendingFiles.push(pf));
     showFP();
