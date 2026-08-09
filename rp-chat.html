@@ -5305,13 +5305,13 @@ function compressImage(file, maxSize=1024, quality=0.82) {
     img.onload = () => {
       URL.revokeObjectURL(url);
       let w = img.naturalWidth, h = img.naturalHeight;
-      if (w <= maxSize && h <= maxSize) {
-        // 不需要壓縮，直接轉 b64
-        toB64(file).then(resolve);
-        return;
+      if (w > maxSize || h > maxSize) {
+        if (w > h) { h = Math.round(h * maxSize / w); w = maxSize; }
+        else { w = Math.round(w * maxSize / h); h = maxSize; }
       }
-      if (w > h) { h = Math.round(h * maxSize / w); w = maxSize; }
-      else { w = Math.round(w * maxSize / h); h = maxSize; }
+      // 不管原本尺寸多小，一律透過 canvas 重新編碼成 JPEG——這樣輸出的格式標記保證跟實際內容一致，
+      // 不會受原始檔案本身的格式資訊不可靠影響（某些來源，例如手機相簿選圖，有時候讀不到正確格式，
+      // 直接沿用原始資料會導致格式標記錯誤，模型/瀏覽器解析失敗）。
       const canvas = document.createElement('canvas');
       canvas.width = w; canvas.height = h;
       canvas.getContext('2d').drawImage(img, 0, 0, w, h);
