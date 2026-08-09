@@ -532,6 +532,7 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
 .modal-cancel { flex: 1; padding: 10px; background: none; border: 1px solid var(--border); color: var(--text-dim); border-radius: 9px; font-size: 13px; cursor: pointer; }
 .modal-confirm { flex: 1; padding: 10px; background: linear-gradient(135deg, var(--accent-dim), var(--accent)); color: #fff; border: none; border-radius: 9px; font-size: 13px; font-weight: 600; cursor: pointer; }
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/heic2any/0.0.4/heic2any.min.js"></script>
 </head>
 <body>
 
@@ -3619,7 +3620,10 @@ setTimeout(() => {
         const isPdf = f.type === 'application/pdf', isImg = f.type.startsWith('image/');
         if (!isPdf && !isImg) return null;
         const b64promise = isImg ? compressImage(f) : toB64(f);
-        return b64promise.then(b64 => ({type:isPdf?'pdf':'image',mime:isPdf?f.type:(b64.match(/^data:(.*?);/)?.[1]||'image/jpeg'),data:b64.split(',')[1],src:b64,name:f.name}));
+        return b64promise.then(b64 => {
+          if (b64 === null) { alert(`「${f.name}」這張圖片瀏覽器沒辦法處理（可能是特殊格式，例如轉檔失敗的 HEIC），請先用其他方式轉成一般的 JPEG/PNG 再傳。`); return null; }
+          return {type:isPdf?'pdf':'image',mime:isPdf?f.type:(b64.match(/^data:(.*?);/)?.[1]||'image/jpeg'),data:b64.split(',')[1],src:b64,name:f.name};
+        });
       })).then(results => {
         results.filter(Boolean).forEach(pf => msgPendingFiles.push(pf));
         renderMsgFilePreview();
@@ -4279,7 +4283,10 @@ document.getElementById('file-input').addEventListener('change', e => {
     const isPdf=f.type==='application/pdf', isImg=f.type.startsWith('image/');
     if(!isPdf&&!isImg) return null;
     const b64promise = isImg ? compressImage(f) : toB64(f);
-    return b64promise.then(b64=>({type:isPdf?'pdf':'image',mime:isPdf?f.type:(b64.match(/^data:(.*?);/)?.[1]||'image/jpeg'),data:b64.split(',')[1],src:b64,name:f.name}));
+    return b64promise.then(b64=>{
+      if (b64 === null) { alert(`「${f.name}」這張圖片瀏覽器沒辦法處理（可能是特殊格式，例如轉檔失敗的 HEIC），請先用其他方式轉成一般的 JPEG/PNG 再傳。`); return null; }
+      return {type:isPdf?'pdf':'image',mime:isPdf?f.type:(b64.match(/^data:(.*?);/)?.[1]||'image/jpeg'),data:b64.split(',')[1],src:b64,name:f.name};
+    });
   })).then(results=>{
     results.filter(Boolean).forEach(pf=>pendingFiles.push(pf));
     showFP();
@@ -5298,8 +5305,39 @@ function toB64(file) {
   return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=()=>rej(new Error('read failed')); r.readAsDataURL(file); });
 }
 
+// 偵測是不是 HEIC/HEIF（iPhone、部分 Android 拍照預設格式）。
+// 不能只看副檔名或 file.type——實測發現有些檔案副檔名被存成 .png，但實際內容是 HEIC，
+// 兩者完全對不上，所以連檔案開頭的 magic bytes 都要檢查，比較保險。
+async function isHeicFile(file) {
+  if (/\.(heic|heif)$/i.test(file.name) || /^image\/hei[cf]/i.test(file.type)) return true;
+  try {
+    const buf = await file.slice(4, 12).arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    const str = String.fromCharCode(...bytes);
+    // HEIF/HEIC 檔案的 ftyp box 通常會包含這幾種品牌標記
+    return /^(ftypheic|ftypheix|ftyphevc|ftypheim|ftypheis|ftyphevm|ftyphevs|ftypmif1)/.test(str);
+  } catch(e) { return false; }
+}
+
+// 把 HEIC/HEIF 轉成瀏覽器看得懂的 JPEG Blob，轉不出來就照樣回傳原始檔案（後面的流程會再擋一次）。
+async function convertHeicIfNeeded(file) {
+  if (!(await isHeicFile(file))) return file;
+  if (typeof heic2any === 'undefined') {
+    console.error('heic2any 函式庫沒載入成功，無法轉換 HEIC 圖片');
+    return file;
+  }
+  try {
+    const blob = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.85 });
+    return new File([blob], file.name.replace(/\.(heic|heif)$/i, '.jpg'), { type: 'image/jpeg' });
+  } catch(e) {
+    console.error('HEIC 轉檔失敗', e);
+    return file;
+  }
+}
+
 function compressImage(file, maxSize=1024, quality=0.82) {
-  return new Promise((resolve) => {
+  return new Promise(async (resolve) => {
+    file = await convertHeicIfNeeded(file);
     const url = URL.createObjectURL(file);
     const img = new Image();
     img.onload = () => {
@@ -5317,7 +5355,12 @@ function compressImage(file, maxSize=1024, quality=0.82) {
       canvas.getContext('2d').drawImage(img, 0, 0, w, h);
       resolve(canvas.toDataURL('image/jpeg', quality));
     };
-    img.onerror = () => { URL.revokeObjectURL(url); toB64(file).then(resolve); };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      // 瀏覽器連載入都做不到（通常是格式不支援，例如轉檔失敗的 HEIC），
+      // 不要再默默把讀不懂的原始資料送出去，回傳 null 讓呼叫端明確告知使用者。
+      resolve(null);
+    };
     img.src = url;
   });
 }
