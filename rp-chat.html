@@ -809,6 +809,10 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
         <span id="bg-last-run" style="color:var(--text-dim)"></span>
         <div id="bg-last-diag" style="margin-top:6px;white-space:pre-line;color:var(--text-dim);border-top:1px solid var(--border);padding-top:6px"></div>
       </div>
+      <div style="font-size:11px;margin-bottom:8px;padding:8px;border-radius:8px;background:var(--surface2);line-height:1.5">
+        前景檢查狀態（App 開著時，每 30 分鐘跑一次）：<span id="fg-last-run" style="font-weight:600;color:var(--text-dim)"></span>
+        <div id="fg-last-diag" style="margin-top:6px;white-space:pre-line;color:var(--text-dim);border-top:1px solid var(--border);padding-top:6px"></div>
+      </div>
       <div id="pg-battery-row" style="display:none;font-size:11px;margin-bottom:8px;padding:8px;border-radius:8px;background:var(--surface2);line-height:1.5">
         電池優化狀態：<span id="pg-battery-status" style="font-weight:600">檢查中…</span>
         <button class="btn-sm" id="pg-battery-btn" style="margin-left:6px;padding:2px 8px;font-size:11px">排除電池優化</button><br>
@@ -1116,6 +1120,7 @@ function updateBgSyncStatusNative() {
   el.textContent = '原生排程已啟用 ✓（實際喚醒間隔由系統決定，不保證準時）';
   el.style.color = '#2e7d32';
   updateLastBgRun();
+  updateLastForegroundRun();
 }
 
 // 顯示背景任務「上次真的被系統喚醒執行」的時間，用來診斷排程到底有沒有真的在跑
@@ -1132,6 +1137,22 @@ function updateLastBgRun() {
     const diag = window.AndroidBridge.getLastBackgroundCheckDiag();
     diagEl.textContent = diag ? ('判斷過程：\n' + diag) : '';
   }
+}
+
+// 前景 checkProactive() 的診斷紀錄，存在 localStorage（跟背景那份分開），設定頁進來時重新讀取顯示。
+function updateLastForegroundRun() {
+  const runEl = document.getElementById('fg-last-run');
+  const diagEl = document.getElementById('fg-last-diag');
+  if (!runEl || !diagEl) return;
+  try {
+    const ts = localStorage.getItem('rp_last_foreground_proactive_time');
+    const diag = localStorage.getItem('rp_last_foreground_proactive_diag');
+    if (!ts) { runEl.textContent = '從來沒有（app 開著時每 30 分鐘會跑一次，還沒跑過或還沒被記錄到）'; diagEl.textContent = ''; return; }
+    const diffMin = Math.round((Date.now() - parseInt(ts,10)) / 60000);
+    const timeStr = new Date(parseInt(ts,10)).toLocaleString('zh-TW', {hour:'2-digit', minute:'2-digit', month:'numeric', day:'numeric'});
+    runEl.textContent = `${timeStr}（約 ${diffMin} 分鐘前）`;
+    diagEl.textContent = diag ? ('判斷過程：\n' + diag) : '';
+  } catch(e) {}
 }
 
 // 電池優化排除狀態（只有原生殼有這個功能）
@@ -2564,9 +2585,10 @@ function renderProactiveList() {
 }
 
 async function checkProactive() {
+  const diag = [];
   const now = new Date();
   const hour = now.getHours();
-  if (hour < proactiveStartHour || hour >= proactiveEndHour) return; // 只在設定的時間範圍內
+  if (hour < proactiveStartHour || hour >= proactiveEndHour) { setLastForegroundDiag(`現在 ${hour} 點，不在設定的觸發時間範圍內`); return; }
   const todayKey = now.toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' }); // en-CA 格式剛好是 yyyy-MM-dd
 
   // 每日重置計數（主頁+對話共用同一個計數）
@@ -2576,52 +2598,80 @@ async function checkProactive() {
   }
 
   // 一天最多幾次（可在設定調整）
-  if (proactiveState.dailyCount >= proactiveMaxDaily) return;
+  if (proactiveState.dailyCount >= proactiveMaxDaily) { setLastForegroundDiag(`已達每日上限 ${proactiveState.dailyCount}/${proactiveMaxDaily}`); return; }
 
   // ── 主頁對話檢查 ──
   for (const convId of proactiveConvIds) {
-    if (proactiveState.dailyCount >= proactiveMaxDaily) break;
+    if (proactiveState.dailyCount >= proactiveMaxDaily) { diag.push('已達每日上限，停止檢查後續對話'); break; }
     const conv = conversations.find(c => c.id === convId);
-    if (!conv || !conv.history.length) continue;
+    if (!conv) { diag.push(`對話 ${convId} 找不到`); continue; }
+    if (!conv.history.length) { diag.push(`「${conv.name}」：沒有歷史訊息`); continue; }
     // 上次是 proactive 且未回覆 → 暫停
     const last = conv.history[conv.history.length - 1];
-    if (last && last.role === 'assistant' && last._proactive) continue;
+    if (last && last.role === 'assistant' && last._proactive) {
+      diag.push(`「${conv.name}」：上一則主動訊息你還沒回覆，暫停中（最後一則型態：${last.role}, _proactive=${last._proactive}）`);
+      continue;
+    }
     // 找最後一則有 _time 的訊息
     const lastMsg = [...conv.history].reverse().find(m => m._time);
-    if (!lastMsg || !lastMsg._time) continue;
+    if (!lastMsg || !lastMsg._time) { diag.push(`「${conv.name}」：抓不到上次互動時間`); continue; }
     const lastMsgTs = parseTwTime(lastMsg._time);
-    if (!lastMsgTs) continue;
+    if (!lastMsgTs) { diag.push(`「${conv.name}」：時間格式解析失敗（${lastMsg._time}）`); continue; }
     const diffMs = now.getTime() - lastMsgTs;
-    if (diffMs < proactiveHours * 60 * 60 * 1000) continue;
+    if (diffMs < proactiveHours * 60 * 60 * 1000) {
+      diag.push(`「${conv.name}」：距離上次互動 ${Math.round(diffMs/60000)} 分鐘，還沒到設定的 ${proactiveHours*60} 分鐘`);
+      continue;
+    }
     // 觸發
+    diag.push(`「${conv.name}」：條件符合，準備觸發（最後訊息型態：${last?.role}, _proactive=${last?._proactive}，距上次互動 ${Math.round(diffMs/60000)} 分鐘）`);
     const ok = await generateProactive(conv);
-    if (ok) proactiveState.dailyCount++;
+    if (ok) { proactiveState.dailyCount++; diag.push(`「${conv.name}」：已送出主動訊息 ✓`); }
+    else diag.push(`「${conv.name}」：呼叫模型失敗`);
     save();
   }
 
   // ── 對話頁檢查 ──
-  if (proactiveState.dailyCount >= proactiveMaxDaily) return;
+  if (proactiveState.dailyCount >= proactiveMaxDaily) { setLastForegroundDiag(diag.join('\n')); return; }
   if (proactiveMsgEnabled) {
     // 上次是 proactive 且未回覆 → 暫停
     const last = msgHistory[msgHistory.length - 1];
-    if (last && last.role === 'assistant' && last._proactive) return;
+    if (last && last.role === 'assistant' && last._proactive) {
+      diag.push('聊天頁：上一則主動訊息你還沒回覆，暫停中');
+      setLastForegroundDiag(diag.join('\n'));
+      return;
+    }
     // 判斷觸發時間
     let lastTs;
     if (msgHistory.length) {
       const lastMsg = [...msgHistory].reverse().find(m => m._time);
-      if (!lastMsg) return;
+      if (!lastMsg) { diag.push('聊天頁：抓不到上次互動時間'); setLastForegroundDiag(diag.join('\n')); return; }
       lastTs = parseTwTime(lastMsg._time);
     } else {
       // 空對話 → 用 messagesEndTime（結束對話的時間）
       lastTs = proactiveState.messagesEndTime;
     }
-    if (!lastTs) return;
-    if (now.getTime() - lastTs < proactiveHours * 60 * 60 * 1000) return;
+    if (!lastTs) { diag.push('聊天頁：沒有可用的時間基準'); setLastForegroundDiag(diag.join('\n')); return; }
+    if (now.getTime() - lastTs < proactiveHours * 60 * 60 * 1000) {
+      diag.push(`聊天頁：距離上次互動 ${Math.round((now.getTime()-lastTs)/60000)} 分鐘，還沒到設定值`);
+      setLastForegroundDiag(diag.join('\n'));
+      return;
+    }
     // 觸發（傳 null 代表對話頁）
     const ok = await generateProactiveMsg();
-    if (ok) proactiveState.dailyCount++;
+    if (ok) { proactiveState.dailyCount++; diag.push('聊天頁：已送出主動訊息 ✓'); }
     save();
+  } else {
+    diag.push('聊天頁：功能未開啟');
   }
+  setLastForegroundDiag(diag.join('\n'));
+}
+
+// 記錄前景 checkProactive() 每次執行的判斷過程，讓你能在設定頁直接看到，跟背景那份診斷分開存。
+function setLastForegroundDiag(text) {
+  try {
+    localStorage.setItem('rp_last_foreground_proactive_diag', text);
+    localStorage.setItem('rp_last_foreground_proactive_time', String(Date.now()));
+  } catch(e) {}
 }
 
 function parseTwTime(str) {
@@ -3710,6 +3760,7 @@ function fillSettingsPage() {
   if (isNative) updateGcalAndroidStatus();
   updateBatteryStatus();
   updateLastBgRun();
+  updateLastForegroundRun();
   document.getElementById('pg-gcal-inject').checked = gcalInject;
   document.getElementById('pg-gcal-disconnect').style.display = gcalToken ? 'block' : 'none';
   document.getElementById('pg-notif-toggle').checked = notifEnabled;
