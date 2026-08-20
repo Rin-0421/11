@@ -4226,7 +4226,8 @@ async function maybeCompress() {
   document.getElementById('summary-step-edit').style.display = 'none';
   modal.style.display = 'flex';
 
-  const COMPRESS_PROMPT = '你的任務是將以下對話整理成簡潔摘要，保留重要劇情、角色情感狀態和關鍵細節，用第三人稱描述，繁體中文。';
+  const COMPRESS_PROMPT = '你是對話中的角色本人，這是你事後獨自回想、寫給自己看的一段回憶，用「你」稱呼自己，就像在心裡對自己說話一樣；提到對方時，一律稱呼「使用者」。請用連貫、細膩的敘事語氣，完整寫下你和使用者之間發生的事——你做了什麼、使用者做了什麼、彼此之間具體的對話與互動細節、你的心情與想法怎麼變化，盡量保留有畫面感的場景與轉折，不要流於概略帶過或條列重點。避免用旁觀者口吻描述，要像是一段完整的內心獨白式回憶。回憶自然收在最近這個時間點即可，不需要額外交代「接下來要做什麼」。繁體中文。';
+  const COMPRESS_SYSTEM = COMPRESS_PROMPT + (instText ? '\n\n[你的角色設定，回憶時語氣、用詞要貼近這個人設]\n' + instText : '');
 
   document.getElementById('summary-gen-btn').onclick = async () => {
     const chosen = sel.value;
@@ -4240,8 +4241,8 @@ async function maybeCompress() {
         res = await fetch('https://api.deepseek.com/chat/completions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${dsKey}` },
-          body: JSON.stringify({ model: 'deepseek-v4-pro', max_tokens: 1024, thinking: { type: 'disabled' }, ...(dsTemperature !== null ? { temperature: dsTemperature } : {}), messages: [
-            { role: 'system', content: COMPRESS_PROMPT },
+          body: JSON.stringify({ model: 'deepseek-v4-pro', max_tokens: 4096, thinking: { type: 'disabled' }, ...(dsTemperature !== null ? { temperature: dsTemperature } : {}), messages: [
+            { role: 'system', content: COMPRESS_SYSTEM },
             ...summaryHistory,
             { role: 'user', content: '請將以上對話整理成摘要。' }
           ]})
@@ -4255,7 +4256,7 @@ async function maybeCompress() {
         res = await fetch('https://api.anthropic.com/v1/messages', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-          body: JSON.stringify({ model: m, max_tokens: 1024, system: COMPRESS_PROMPT, messages: [...summaryHistory, { role: 'user', content: '請將以上對話整理成摘要。' }] })
+          body: JSON.stringify({ model: m, max_tokens: 4096, system: COMPRESS_SYSTEM, messages: [...summaryHistory, { role: 'user', content: '請將以上對話整理成摘要。' }] })
         });
         const d = await res.json(); summary = d.content?.[0]?.text || '';
         if (summary && d.stop_reason && d.stop_reason !== 'end_turn') incomplete = true;
@@ -4265,7 +4266,7 @@ async function maybeCompress() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${oaiKey}` },
           body: JSON.stringify({ model: 'gpt-4o-2024-05-13', max_tokens: 1024, messages: [
-            { role: 'system', content: COMPRESS_PROMPT },
+            { role: 'system', content: COMPRESS_SYSTEM },
             ...summaryHistory,
             { role: 'user', content: '請將以上對話整理成摘要。' }
           ]})
