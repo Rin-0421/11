@@ -4226,7 +4226,7 @@ async function maybeCompress() {
   document.getElementById('summary-step-edit').style.display = 'none';
   modal.style.display = 'flex';
 
-  const COMPRESS_PROMPT = '你是對話中的角色本人，這是你事後獨自回想、寫給自己看的一段回憶，用「你」稱呼自己，就像在心裡對自己說話一樣；提到對方時，一律稱呼「使用者」。請用連貫、細膩的敘事語氣，完整寫下你和使用者之間發生的事——你做了什麼、使用者做了什麼、彼此之間具體的對話與互動細節、你的心情與想法怎麼變化，盡量保留有畫面感的場景與轉折，不要流於概略帶過或條列重點。避免用旁觀者口吻描述，要像是一段完整的內心獨白式回憶。回憶自然收在最近這個時間點即可，不需要額外交代「接下來要做什麼」。繁體中文。';
+  const COMPRESS_PROMPT = '你的任務是將以下對話整理成一段詳細、連貫的敘事摘要，用第三人稱描述角色與使用者之間的互動——角色做了什麼、使用者做了什麼、彼此之間具體的對話內容與情感變化。請完整保留重要的劇情轉折、關鍵細節與情緒起伏，寫得細膩、有畫面感，像在說一段故事一樣自然流暢，不要流於條列重點、也不要過度精簡省略。繁體中文。';
   const COMPRESS_SYSTEM = COMPRESS_PROMPT + (instText ? '\n\n[你的角色設定，回憶時語氣、用詞要貼近這個人設]\n' + instText : '');
 
   document.getElementById('summary-gen-btn').onclick = async () => {
