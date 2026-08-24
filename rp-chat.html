@@ -4223,7 +4223,7 @@ async function maybeCompress() {
   document.getElementById('summary-step-edit').style.display = 'none';
   modal.style.display = 'flex';
 
-  const COMPRESS_PROMPT = '這些對話紀錄是你之後回覆的時候需要參考的前提，整理成一段詳細、連貫的敘事摘要。不可寫成跟使用者的互動，而是一段完整的過往摘要。完整保留重要的劇情轉折、關鍵細節與情緒起伏，不要流於條列重點、也不要過度精簡省略。使用繁體中文。';
+  const COMPRESS_PROMPT = '這些對話紀錄是你之後回覆的時候需要參考的前提，整理成一段詳細連貫的敘事摘要，讓你之後回覆可以順著推劇情。不可寫成跟使用者的互動，而是一段完整的過往摘要。保留重要的劇情轉折、關鍵細節與情緒起伏，但不是什麼都留，紀錄對話的精華內容即可。使用繁體中文。';
 
   document.getElementById('summary-gen-btn').onclick = async () => {
     const chosen = sel.value;
