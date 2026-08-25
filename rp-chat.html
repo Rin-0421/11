@@ -577,6 +577,7 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
         <optgroup label="DeepSeek">
           <option value="deepseek-v4-flash">DS V4 Flash</option>
           <option value="deepseek-v4-pro">DS V4 Pro</option>
+          <option value="deepseek-v4-flash-vision-exp">DS V4 Vision (看得懂圖片)</option>
         </optgroup>
       </select>
     </div>
@@ -616,6 +617,7 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
         <optgroup label="DeepSeek">
           <option value="deepseek-v4-flash">DS V4 Flash</option>
           <option value="deepseek-v4-pro">DS V4 Pro</option>
+          <option value="deepseek-v4-flash-vision-exp">DS V4 Vision (看得懂圖片)</option>
         </optgroup>
       </select>
       <button class="think-toggle" id="msg-end-btn" title="結束對話" style="font-size:11px">結束</button>
@@ -1207,6 +1209,7 @@ const KEEP_RECENT = 10; // 保留最新幾則不壓縮，固定不變
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2); }
 function currentConv() { return conversations.find(c => c.id === currentConvId); }
 function isDeepSeek(model) { return model.startsWith('deepseek-'); }
+function isDeepSeekVision(model) { return model === 'deepseek-v4-flash-vision-exp'; }
 function isOpenAI(model) { return model.startsWith('gpt-') || model.startsWith('o1') || model.startsWith('o3'); }
 function getKey(model) {
   if (isDeepSeek(model)) return dsKey;
@@ -3198,6 +3201,12 @@ async function regenerateAssistantMsg() {
         imageParts.forEach(img => parts.push({ type: 'image_url', image_url: { url: `data:${img.mime};base64,${img.data}` } }));
         return { role: m.role, content: parts.length === 1 && parts[0].type === 'text' ? parts[0].text : parts };
       } else if (useDS) {
+        if (isDeepSeekVision(model) && imageParts.length) {
+          const parts = [];
+          if (combinedText) parts.push({ type: 'text', text: combinedText });
+          imageParts.forEach(img => parts.push({ type: 'image_url', image_url: { url: `data:${img.mime};base64,${img.data}` } }));
+          return { role: m.role, content: parts.length === 1 && parts[0].type === 'text' ? parts[0].text : parts };
+        }
         let text = combinedText;
         if (imageParts.length && !text) text = '[圖片]';
         else if (imageParts.length) text = text + ` [${imageParts.length} 張圖片]`;
@@ -3410,7 +3419,13 @@ async function sendMsg() {
         imageParts.forEach(img => parts.push({ type: 'image_url', image_url: { url: `data:${img.mime};base64,${img.data}` } }));
         return { role: m.role, content: parts.length === 1 && parts[0].type === 'text' ? parts[0].text : parts };
       } else if (useDS) {
-        // DS 不支援圖片，只保留文字（如果有圖片，加註記提醒）
+        // DS Vision 模型支援圖片，直接送；其他 DS 模型不支援，只保留文字（如果有圖片，加註記提醒）
+        if (isDeepSeekVision(model) && imageParts.length) {
+          const parts = [];
+          if (combinedText) parts.push({ type: 'text', text: combinedText });
+          imageParts.forEach(img => parts.push({ type: 'image_url', image_url: { url: `data:${img.mime};base64,${img.data}` } }));
+          return { role: m.role, content: parts.length === 1 && parts[0].type === 'text' ? parts[0].text : parts };
+        }
         let text = combinedText;
         if (imageParts.length && !text) text = '[圖片]';
         else if (imageParts.length) text = text + ` [${imageParts.length} 張圖片]`;
@@ -4459,10 +4474,10 @@ async function send() {
           const parts = [];
           for (const b of m.content) {
             if (b.type === 'text') parts.push({ type: 'text', text: b.text });
-            else if (b.type === 'image' && useOAI) {
+            else if (b.type === 'image' && (useOAI || isDeepSeekVision(model))) {
               parts.push({ type: 'image_url', image_url: { url: `data:${b.source.media_type};base64,${b.source.data}` } });
             } else if (b.type === 'image' && useDS) {
-              // DeepSeek 的公開 API 目前不支援圖片輸入。只對「這次新傳的訊息」呼叫 Gemini 描述，
+              // DeepSeek 一般模型不支援圖片輸入（DS Vision 模型除外，見上）。只對「這次新傳的訊息」呼叫 Gemini 描述，
               // 歷史裡的舊圖片不會每次都重新描述一次，避免浪費 API 額度。
               if (idx === _lastIdx) {
                 const { text: desc, error: descErr } = await fetchGeminiImageDescription(b.source.media_type, b.source.data, geminiKey);
@@ -4725,7 +4740,7 @@ async function regenerateFrom(historyIdx) {
           const parts=[];
           for (const b of m.content) {
             if (b.type==='text') parts.push({type:'text',text:b.text});
-            else if (b.type==='image'&&useOAI) parts.push({type:'image_url',image_url:{url:`data:${b.source.media_type};base64,${b.source.data}`}});
+            else if (b.type==='image'&&(useOAI||isDeepSeekVision(model))) parts.push({type:'image_url',image_url:{url:`data:${b.source.media_type};base64,${b.source.data}`}});
             else if (b.type==='image'&&useDS) {
               if (idx === _lastIdx) {
                 const { text: desc, error: descErr } = await fetchGeminiImageDescription(b.source.media_type, b.source.data, geminiKey);
