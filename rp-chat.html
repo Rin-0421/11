@@ -575,9 +575,8 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
           <option value="claude-opus-5">Opus 5</option>
         </optgroup>
         <optgroup label="DeepSeek">
-          <option value="deepseek-v4-flash">DS V4 Flash</option>
           <option value="deepseek-v4-pro">DS V4 Pro</option>
-          <option value="deepseek-v4-flash-vision-exp">DS V4 Vision (看得懂圖片)</option>
+          <option value="deepseek-v4-flash-vision-exp">DS V4 Vision</option>
         </optgroup>
       </select>
     </div>
@@ -615,9 +614,8 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
           <option value="claude-opus-5">Opus 5</option>
         </optgroup>
         <optgroup label="DeepSeek">
-          <option value="deepseek-v4-flash">DS V4 Flash</option>
           <option value="deepseek-v4-pro">DS V4 Pro</option>
-          <option value="deepseek-v4-flash-vision-exp">DS V4 Vision (看得懂圖片)</option>
+          <option value="deepseek-v4-flash-vision-exp">DS V4 Vision</option>
         </optgroup>
       </select>
       <button class="think-toggle" id="msg-end-btn" title="結束對話" style="font-size:11px">結束</button>
@@ -2693,8 +2691,7 @@ async function generateProactive(conv) {
   const useOAI = isOpenAI(model);
   const key = getKey(model);
   if (!key) return false;
-  const sys = buildSystem();
-  const _twNow = new Date().toLocaleString('zh-TW', {timeZone:'Asia/Taipei', year:'numeric', month:'long', day:'numeric', weekday:'short', hour:'2-digit', minute:'2-digit', hour12:false});
+  const sys = buildSystem(model);
   const _gcalCtx = buildGcalContext();
   const _fitCtx = buildFitContext(conv);
   const contextParts = [`[當前台灣時間：${_twNow}]`];
@@ -3174,6 +3171,7 @@ async function regenerateAssistantMsg() {
     const sysParts = [];
     if (docs.length) { sysParts.push('[知識文件]'); docs.forEach(d => sysParts.push(`## ${d.name}\n${d.content}`)); }
     if (instTextMsg) sysParts.push('[指令]\n' + instTextMsg);
+    if (model && model.includes('flash')) sysParts.push('[回覆篇幅與細節要求]\n' + FLASH_LENGTH_PROMPT);
         const sys = sysParts.join('\n\n');
 
     const useDS = isDeepSeek(model);
@@ -3390,6 +3388,7 @@ async function sendMsg() {
     const sysParts = [];
     if (docs.length) { sysParts.push('[知識文件]'); docs.forEach(d=>sysParts.push(`## ${d.name}\n${d.content}`)); }
     if (instTextMsg) sysParts.push('[指令]\n' + instTextMsg);
+    if (model && model.includes('flash')) sysParts.push('[回覆篇幅與細節要求]\n' + FLASH_LENGTH_PROMPT);
         const sys = sysParts.join('\n\n');
 
     const useDS = isDeepSeek(model);
@@ -4388,10 +4387,13 @@ document.getElementById('send-btn').addEventListener('click', () => {
   else { send(); }
 });
 
-function buildSystem() {
+const FLASH_LENGTH_PROMPT = '你在跟使用者互動，不可以過於簡潔的回覆。把每一輪回覆寫得更完整——透過場景描寫、角色的動作與心理反應、對話的鋪陳，讓劇情確實往前推進。但不准堆砌形容詞、重複句子或空泛描述湊字數，要有實質的劇情或角色行為在發展。若使用者給你的內容很短，就盡力回覆，禁止任何無意義的湊字數行為。如果這則訊息附帶一張圖片以上，逐張仔細觀察每一張的具體內容，並在回覆裡分別針對每一張圖片的細節做出反應，不要只用一句話籠統帶過整體印象。';
+
+function buildSystem(model) {
   const parts=[];
   if (docs.length) { parts.push('[知識文件]'); docs.forEach(d=>parts.push(`## ${d.name}\n${d.content}`)); }
   if (instText) parts.push('[指令]\n'+instText);
+  if (model && model.includes('flash')) parts.push('[回覆篇幅與細節要求]\n'+FLASH_LENGTH_PROMPT);
     return parts.join('\n\n');
 }
 
@@ -4432,7 +4434,7 @@ async function send() {
 
   try {
     const model=conv.model || document.getElementById('chat-model').value;
-    const sys=buildSystem();
+    const sys=buildSystem(model);
     const apiMessages=conv.history.filter(m=>!m._notice).map(m=>{
       if (Array.isArray(m.content)) {
         const filtered = m.content.filter(b=>b.type!=='thinking');
@@ -4700,7 +4702,7 @@ async function regenerateFrom(historyIdx) {
 
   try {
     const model=conv.model || document.getElementById('chat-model').value;
-    const sys=buildSystem();
+    const sys=buildSystem(model);
     const apiMessages=conv.history.filter(m=>!m._notice).map(m=>{
       if (Array.isArray(m.content)) {
         const filtered=m.content.filter(b=>b.type!=='thinking');
