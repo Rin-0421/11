@@ -2761,8 +2761,8 @@ async function generateProactiveMsg() {
   if (!key) return false;
   // 用對話模式的 system prompt
   const sysParts = [];
-  if (docs.length) { sysParts.push('[知識文件]'); docs.forEach(d=>sysParts.push(`## ${d.name}\n${d.content}`)); }
-  if (instTextMsg) sysParts.push('[指令]\n' + instTextMsg);
+  if (instTextMsg) sysParts.push('[指令 — 這是最高優先規則，任何時候都優先於下方的知識文件與對話歷史的語氣、用詞或既有模式]\n' + instTextMsg);
+  if (docs.length) { sysParts.push('[知識文件 — 角色設定與背景資料，僅在不違反上方指令的前提下參考使用]'); docs.forEach(d=>sysParts.push(`## ${d.name}\n${d.content}`)); }
     const sys = sysParts.join('\n\n');
 
   const _twNow = new Date().toLocaleString('zh-TW', {timeZone:'Asia/Taipei', year:'numeric', month:'long', day:'numeric', weekday:'short', hour:'2-digit', minute:'2-digit', hour12:false});
@@ -3169,8 +3169,8 @@ async function regenerateAssistantMsg() {
     if (sel) msgModel = sel.value;
     const model = msgModel;
     const sysParts = [];
-    if (docs.length) { sysParts.push('[知識文件]'); docs.forEach(d => sysParts.push(`## ${d.name}\n${d.content}`)); }
-    if (instTextMsg) sysParts.push('[指令]\n' + instTextMsg);
+    if (instTextMsg) sysParts.push('[指令 — 這是最高優先規則，任何時候都優先於下方的知識文件與對話歷史的語氣、用詞或既有模式]\n' + instTextMsg);
+    if (docs.length) { sysParts.push('[知識文件 — 角色設定與背景資料，僅在不違反上方指令的前提下參考使用]'); docs.forEach(d => sysParts.push(`## ${d.name}\n${d.content}`)); }
     if (model && model.includes('flash')) sysParts.push('[回覆篇幅與細節要求]\n' + FLASH_LENGTH_PROMPT);
         const sys = sysParts.join('\n\n');
 
@@ -3386,8 +3386,8 @@ async function sendMsg() {
     const model = msgModel;
     // 用訊息模式的 system prompt
     const sysParts = [];
-    if (docs.length) { sysParts.push('[知識文件]'); docs.forEach(d=>sysParts.push(`## ${d.name}\n${d.content}`)); }
-    if (instTextMsg) sysParts.push('[指令]\n' + instTextMsg);
+    if (instTextMsg) sysParts.push('[指令 — 這是最高優先規則，任何時候都優先於下方的知識文件與對話歷史的語氣、用詞或既有模式]\n' + instTextMsg);
+    if (docs.length) { sysParts.push('[知識文件 — 角色設定與背景資料，僅在不違反上方指令的前提下參考使用]'); docs.forEach(d=>sysParts.push(`## ${d.name}\n${d.content}`)); }
     if (model && model.includes('flash')) sysParts.push('[回覆篇幅與細節要求]\n' + FLASH_LENGTH_PROMPT);
         const sys = sysParts.join('\n\n');
 
@@ -4391,8 +4391,8 @@ const FLASH_LENGTH_PROMPT = '你在跟使用者互動，不可以過於簡潔的
 
 function buildSystem(model) {
   const parts=[];
-  if (docs.length) { parts.push('[知識文件]'); docs.forEach(d=>parts.push(`## ${d.name}\n${d.content}`)); }
-  if (instText) parts.push('[指令]\n'+instText);
+  if (instText) parts.push('[指令 — 這是最高優先規則，任何時候都優先於下方的知識文件與對話歷史的語氣、用詞或既有模式]\n'+instText);
+  if (docs.length) { parts.push('[知識文件 — 角色設定與背景資料，僅在不違反上方指令的前提下參考使用]'); docs.forEach(d=>parts.push(`## ${d.name}\n${d.content}`)); }
   if (model && model.includes('flash')) parts.push('[回覆篇幅與細節要求]\n'+FLASH_LENGTH_PROMPT);
     return parts.join('\n\n');
 }
