@@ -3171,7 +3171,10 @@ async function regenerateAssistantMsg() {
     const sysParts = [];
     if (instTextMsg) sysParts.push('[指令 — 這是最高優先規則，任何時候都優先於下方的知識文件與對話歷史的語氣、用詞或既有模式]\n' + instTextMsg);
     if (docs.length) { sysParts.push('[知識文件 — 角色設定與背景資料，僅在不違反上方指令的前提下參考使用]'); docs.forEach(d => sysParts.push(`## ${d.name}\n${d.content}`)); }
-    if (model && model.includes('flash')) sysParts.push('[回覆篇幅與細節要求]\n' + FLASH_LENGTH_PROMPT);
+    if (model && isDeepSeek(model)) {
+      sysParts.push('[回覆篇幅與細節要求]\n' + FLASH_LENGTH_PROMPT);
+      if (isDeepSeekVision(model)) sysParts.push('[圖片觀察要求]\n' + VISION_EXTRA_PROMPT);
+    }
         const sys = sysParts.join('\n\n');
 
     const useDS = isDeepSeek(model);
@@ -3388,7 +3391,10 @@ async function sendMsg() {
     const sysParts = [];
     if (instTextMsg) sysParts.push('[指令 — 這是最高優先規則，任何時候都優先於下方的知識文件與對話歷史的語氣、用詞或既有模式]\n' + instTextMsg);
     if (docs.length) { sysParts.push('[知識文件 — 角色設定與背景資料，僅在不違反上方指令的前提下參考使用]'); docs.forEach(d=>sysParts.push(`## ${d.name}\n${d.content}`)); }
-    if (model && model.includes('flash')) sysParts.push('[回覆篇幅與細節要求]\n' + FLASH_LENGTH_PROMPT);
+    if (model && isDeepSeek(model)) {
+      sysParts.push('[回覆篇幅與細節要求]\n' + FLASH_LENGTH_PROMPT);
+      if (isDeepSeekVision(model)) sysParts.push('[圖片觀察要求]\n' + VISION_EXTRA_PROMPT);
+    }
         const sys = sysParts.join('\n\n');
 
     const useDS = isDeepSeek(model);
@@ -4387,13 +4393,17 @@ document.getElementById('send-btn').addEventListener('click', () => {
   else { send(); }
 });
 
-const FLASH_LENGTH_PROMPT = '你在跟使用者互動，不可以過於簡潔的回覆。把每一輪回覆寫得更完整——透過場景描寫、角色的動作與心理反應、對話的鋪陳，讓劇情確實往前推進。但不准堆砌形容詞、重複句子或空泛描述湊字數，要有實質的劇情或角色行為在發展。若使用者給你的內容很短，就盡力回覆，禁止任何無意義的湊字數行為。如果這則訊息附帶一張圖片以上，逐張仔細觀察每一張的具體內容，並在回覆裡分別針對每一張圖片的細節做出反應，不要只用一句話籠統帶過整體印象。';
+const FLASH_LENGTH_PROMPT = '你在跟使用者互動，不可以過於簡潔回覆，嚴禁編造知識文件以及對話歷史沒有的事情。把每一輪回覆寫得更完整，透過場景描寫、角色的動作與心理反應、對話的鋪陳，讓劇情確實往前推進。但不准堆砌形容詞、重複句子或空泛描述湊字數，要有實質的劇情或角色行為在發展。若使用者給你的內容很短，就盡力回覆，禁止任何無意義的湊字數行為。';
+const VISION_EXTRA_PROMPT = '如果訊息附帶一張圖片以上，逐張仔細觀察每一張的內容，並在回覆裡分別針對每一張圖片的細節做出反應，不要只用一句話籠統帶過整體印象。';
 
 function buildSystem(model) {
   const parts=[];
   if (instText) parts.push('[指令 — 這是最高優先規則，任何時候都優先於下方的知識文件與對話歷史的語氣、用詞或既有模式]\n'+instText);
   if (docs.length) { parts.push('[知識文件 — 角色設定與背景資料，僅在不違反上方指令的前提下參考使用]'); docs.forEach(d=>parts.push(`## ${d.name}\n${d.content}`)); }
-  if (model && model.includes('flash')) parts.push('[回覆篇幅與細節要求]\n'+FLASH_LENGTH_PROMPT);
+  if (model && isDeepSeek(model)) {
+    parts.push('[回覆篇幅與細節要求]\n'+FLASH_LENGTH_PROMPT);
+    if (isDeepSeekVision(model)) parts.push('[圖片觀察要求]\n'+VISION_EXTRA_PROMPT);
+  }
     return parts.join('\n\n');
 }
 
