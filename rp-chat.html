@@ -569,8 +569,8 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
       <button class="think-toggle" id="search-toggle" title="網路搜尋">🔍</button>
       <select class="hdr-select" id="chat-model">
         <optgroup label="Claude">
-          <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
-          <option value="claude-sonnet-4-6" selected>Sonnet 4.6</option>
+          <option value="claude-sonnet-5-5::low">Sonnet 5.5（低）</option>
+          <option value="claude-sonnet-5-5::medium" selected>Sonnet 5.5（中）</option>
           <option value="claude-opus-4-6">Opus 4.6</option>
           <option value="claude-opus-5-5::low">Opus 5.5（低）</option>
           <option value="claude-opus-5-5::medium">Opus 5.5（中）</option>
@@ -609,8 +609,8 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
       <button class="think-toggle" id="msg-search-toggle" title="網路搜尋">🔍</button>
       <select class="hdr-select" id="msg-model-select">
         <optgroup label="Claude">
-          <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
-          <option value="claude-sonnet-4-6" selected>Sonnet 4.6</option>
+          <option value="claude-sonnet-5-5::low">Sonnet 5.5（低）</option>
+          <option value="claude-sonnet-5-5::medium" selected>Sonnet 5.5（中）</option>
           <option value="claude-opus-4-6">Opus 4.6</option>
           <option value="claude-opus-5-5::low">Opus 5.5（低）</option>
           <option value="claude-opus-5-5::medium">Opus 5.5（中）</option>
@@ -1201,7 +1201,7 @@ let periodInject = false, periodData = { entries: [], cycleLength: 28 };
 let locInject = false, usageInject = false;
 let proactiveConvIds = [], proactiveState = { lastCheckDate: '', dailyCounts: {} }, proactiveTimer = null;
 let notifications = [], notifEnabled = false, notifLeadMin = 10, notifCheckTimer = null, notifiedIds = new Set();
-let instTextMsg = '', msgHistory = [], msgArchives = [], msgPendingFiles = [], proactiveMsgEnabled = false, msgModel = 'claude-sonnet-4-6', proactiveHours = 3, proactiveMaxDaily = 3, proactiveStartHour = 9, proactiveEndHour = 21;
+let instTextMsg = '', msgHistory = [], msgArchives = [], msgPendingFiles = [], proactiveMsgEnabled = false, msgModel = 'claude-sonnet-5-5::medium', proactiveHours = 3, proactiveMaxDaily = 3, proactiveStartHour = 9, proactiveEndHour = 21;
 const NOTIF_VIEW_ID = '__notifications__';
 
 let compressThreshold = 80; // 累積到幾則觸發壓縮，可在設定調整（用量追蹤失效時的防呆保底，門檻拉高很多）
@@ -1217,7 +1217,16 @@ function isOpenAI(model) { return model.startsWith('gpt-') || model.startsWith('
 // Opus 5.5 在選單裡固定拆成「低」「中」兩個項目，value 用 "claude-opus-5-5::low" / "::medium" 編碼，
 // 真正打 API 時要拆開：model 只送 "::" 前面的真實模型 id，effort 直接用後面固定的字串，
 // 不受畫面上的思考開關或 Settings 裡的 effort 選單影響（Opus 5.5 本來就不能關閉思考）。
-function isOpus55(model) { return model.startsWith('claude-opus-5-5::'); }
+function hasFixedEffort(model) { return model.startsWith('claude-opus-5-5::') || model.startsWith('claude-sonnet-5-5::'); }
+const DEFAULT_MODEL = 'claude-sonnet-5-5::medium';
+// 選單已經拿掉的舊模型（Sonnet 4.6、Haiku 4.5、Opus 5），舊對話/設定裡存的值統一換成現有選項，避免選單變空白
+function migrateModelId(m) {
+  if (!m) return DEFAULT_MODEL;
+  if (m === 'claude-sonnet-4-6') return 'claude-sonnet-5-5::medium';
+  if (m === 'claude-haiku-4-5-20251001') return 'claude-sonnet-5-5::low';
+  if (m === 'claude-opus-5') return 'claude-opus-5-5::medium';
+  return m;
+}
 function resolveApiModel(model) { const i = model.indexOf('::'); return i === -1 ? model : model.slice(0, i); }
 function resolveEffortOverride(model) { const i = model.indexOf('::'); return i === -1 ? null : model.slice(i + 2); }
 function getKey(model) {
@@ -1262,7 +1271,7 @@ async function idbSet(key, value) {
 
 // ── Load（含舊版 localStorage 資料自動搬遷）──
 async function loadState() {
-  let globalSavedModel = 'claude-sonnet-4-6';
+  let globalSavedModel = 'claude-sonnet-5-5::medium';
   try {
     let s = await idbGet(SK);
     if (!s) {
@@ -1339,11 +1348,12 @@ async function loadState() {
       proactiveEndHour = (typeof s.proactiveEndHour === 'number') ? s.proactiveEndHour : 21;
       compressThreshold = (typeof s.compressThreshold === 'number' && s.compressThreshold > KEEP_RECENT) ? s.compressThreshold : 300;
       compressTokenThreshold = (typeof s.compressTokenThreshold === 'number' && s.compressTokenThreshold > 1000) ? s.compressTokenThreshold : 70000;
-      msgModel = s.msgModel || 'claude-sonnet-4-6';
+      msgModel = migrateModelId(s.msgModel);
       applyDarkMode();
       conversations = s.conversations || [];
+      conversations.forEach(c => { c.model = migrateModelId(c.model); });
       currentConvId = s.currentConvId || null;
-      globalSavedModel = s.model || 'claude-sonnet-4-6';
+      globalSavedModel = migrateModelId(s.model);
     }
     // 一次性自我修復：主動訊息勾選清單裡，如果有對話已經被刪除卻還殘留在清單裡，這裡清掉
     // （之前刪除對話時沒有同步移除，可能留下背景檢查一直撲空的殘留 ID）
@@ -1619,7 +1629,7 @@ document.getElementById('search-toggle').addEventListener('click', () => {
 });
 document.getElementById('think-toggle').addEventListener('click', () => {
   const model = document.getElementById('chat-model').value;
-  if (isOpus55(model)) { alert('Opus 5.5 的思考無法關閉，效果強度已經由選單裡的「低／中」版本固定，不需要另外切換。'); return; }
+  if (hasFixedEffort(model)) { alert('5.5 系列在這個 app 裡思考固定開啟，效果強度已經由選單裡的「低／中」版本決定，不需要另外切換。'); return; }
   if (!thinkingEnabled && (model==='claude-haiku-4-5-20251001' || isOpenAI(model))) {
     alert(isOpenAI(model) ? 'OpenAI 模型不支援延伸思考。' : '延伸思考不支援 Haiku，請先切換模型。'); return;
   }
@@ -1627,7 +1637,7 @@ document.getElementById('think-toggle').addEventListener('click', () => {
 });
 document.getElementById('chat-model').addEventListener('change', () => {
   const model = document.getElementById('chat-model').value;
-  if (isOpus55(model)) {
+  if (hasFixedEffort(model)) {
     // Opus 5.5 一律開著思考，圖示跟著顯示成「開」，效果強度已經固定在選單版本裡
     thinkingEnabled = true; updateThinkBtn();
   } else if (thinkingEnabled && (model==='claude-haiku-4-5-20251001' || isOpenAI(model))) {
@@ -2764,7 +2774,7 @@ async function generateProactive(conv) {
   // 注意：這裡的 conv 不一定是「目前正在看」的那個對話窗口（背景巡檢可能輪到其他視窗），
   // 所以絕對不能用 document.getElementById('chat-model').value 當備援 —— 那只反映當下畫面顯示的對話，
   // 沒有自己 model 的舊對話／匯入對話，備援值固定給一個安全預設即可。
-  const model = conv.model || 'claude-sonnet-4-6';
+  const model = migrateModelId(conv.model);
   const useDS = isDeepSeek(model);
   const useOAI = isOpenAI(model);
   const key = getKey(model);
@@ -2810,7 +2820,7 @@ async function generateProactive(conv) {
       // （Opus 5.5 例外：它不能關閉思考，改成照選單裡固定的低/中效果跑）
       const claudeMessages = addHistoryCacheBreakpoint(apiMessages);
       body = { model: resolveApiModel(model), max_tokens: 2000 };
-      if (isOpus55(model)) { body.thinking = { type: 'adaptive' }; body.output_config = { effort: resolveEffortOverride(model) }; }
+      if (hasFixedEffort(model)) { body.thinking = { type: 'adaptive' }; body.output_config = { effort: resolveEffortOverride(model) }; }
       if (sys) body.system = [{ type:'text', text:sys, cache_control:{ type:'ephemeral', ttl:'1h' } }];
       const _tools = [...getHealthTools(), ...getCalendarTools()];
       if (_tools.length) body.tools = _tools;
@@ -3335,9 +3345,9 @@ async function regenerateAssistantMsg() {
       url = 'https://api.openai.com/v1/chat/completions';
     } else {
       claudeMessages = addHistoryCacheBreakpoint(apiMessages);
-      body = { model: resolveApiModel(model), max_tokens: (thinkingEnabled || isOpus55(model)) ? 16000 : 2048, stream: true };
+      body = { model: resolveApiModel(model), max_tokens: (thinkingEnabled || hasFixedEffort(model)) ? 16000 : 2048, stream: true };
       if (sys) body.system = [{ type:'text', text:sys, cache_control:{ type:'ephemeral', ttl:'1h' } }];
-      if (isOpus55(model)) {
+      if (hasFixedEffort(model)) {
         // Opus 5.5 不能關閉思考，效果強度固定用選單裡編碼的低/中，不受思考開關或 Settings 的 effort 設定影響
         body.thinking = { type: 'adaptive' }; body.output_config = { effort: resolveEffortOverride(model) };
       } else if (thinkingEnabled) {
@@ -3563,9 +3573,9 @@ async function sendMsg() {
       url = 'https://api.openai.com/v1/chat/completions';
     } else {
       claudeMessages = addHistoryCacheBreakpoint(apiMessages);
-      body = { model: resolveApiModel(model), max_tokens: (thinkingEnabled || isOpus55(model)) ? 16000 : 2048, stream: true };
+      body = { model: resolveApiModel(model), max_tokens: (thinkingEnabled || hasFixedEffort(model)) ? 16000 : 2048, stream: true };
       if (sys) body.system = [{ type:'text', text:sys, cache_control:{ type:'ephemeral', ttl:'1h' } }];
-      if (isOpus55(model)) {
+      if (hasFixedEffort(model)) {
         body.thinking = { type: 'adaptive' }; body.output_config = { effort: resolveEffortOverride(model) };
       } else if (thinkingEnabled) {
         if (model === 'claude-haiku-4-5-20251001') { body.thinking = { type:'enabled', budget_tokens:10000 }; }
@@ -3813,7 +3823,7 @@ setTimeout(() => {
     msgModelSel.addEventListener('change', (e) => {
       msgModel = e.target.value;
       // 檢查思考/搜尋相容性
-      if (isOpus55(msgModel)) {
+      if (hasFixedEffort(msgModel)) {
         thinkingEnabled = true; updateThinkBtn(); updateMsgThinkBtn();
       } else if (thinkingEnabled && (msgModel==='claude-haiku-4-5-20251001' || isOpenAI(msgModel))) {
         thinkingEnabled=false; updateThinkBtn(); updateMsgThinkBtn();
@@ -3825,7 +3835,7 @@ setTimeout(() => {
   if (msgThinkBtn) {
     msgThinkBtn.addEventListener('click', () => {
       const model = msgModel;
-      if (isOpus55(model)) { alert('Opus 5.5 的思考無法關閉，效果強度已經由選單裡的「低／中」版本固定，不需要另外切換。'); return; }
+      if (hasFixedEffort(model)) { alert('5.5 系列在這個 app 裡思考固定開啟，效果強度已經由選單裡的「低／中」版本決定，不需要另外切換。'); return; }
       if (!thinkingEnabled && (model==='claude-haiku-4-5-20251001' || isOpenAI(model))) {
         alert(isOpenAI(model) ? 'OpenAI 模型不支援延伸思考。' : '延伸思考不支援 Haiku。'); return;
       }
@@ -4607,9 +4617,9 @@ async function send() {
     } else {
       // Claude 用 Anthropic 格式：system prompt + 對話歷史都做 Prompt Caching，並提供健康資料工具讓模型自己選擇要不要查
       claudeMessages = addHistoryCacheBreakpoint(apiMessages);
-      body = { model: resolveApiModel(model), max_tokens: (thinkingEnabled||isOpus55(model))?16000:2048, stream: true };
+      body = { model: resolveApiModel(model), max_tokens: (thinkingEnabled||hasFixedEffort(model))?16000:2048, stream: true };
       if (sys) body.system = [{ type:'text', text:sys, cache_control:{ type:'ephemeral', ttl:'1h' } }];
-      if (isOpus55(model)) {
+      if (hasFixedEffort(model)) {
         body.thinking = { type: 'adaptive' }; body.output_config = { effort: resolveEffortOverride(model) };
       } else if (thinkingEnabled) {
         if (model === 'claude-haiku-4-5-20251001') { body.thinking = { type:'enabled', budget_tokens:10000 }; }
@@ -4867,9 +4877,9 @@ async function regenerateFrom(historyIdx) {
       url=useDS?'https://api.deepseek.com/chat/completions':'https://api.openai.com/v1/chat/completions';
     } else {
       claudeMessages = addHistoryCacheBreakpoint(apiMessages);
-      body={model:resolveApiModel(model),max_tokens:(thinkingEnabled||isOpus55(model))?16000:2048,stream:true};
+      body={model:resolveApiModel(model),max_tokens:(thinkingEnabled||hasFixedEffort(model))?16000:2048,stream:true};
       if (sys) body.system=[{type:'text',text:sys,cache_control:{type:'ephemeral',ttl:'1h'}}];
-      if (isOpus55(model)) {
+      if (hasFixedEffort(model)) {
         body.thinking={type:'adaptive'}; body.output_config={effort:resolveEffortOverride(model)};
       } else if (thinkingEnabled) {
         if (model === 'claude-haiku-4-5-20251001') { body.thinking={type:'enabled',budget_tokens:10000}; }
@@ -5330,7 +5340,7 @@ function doClaudeImport() {
   // 只保留最後 40 則
   const kept = converted.slice(-40);
 
-  const newConv = { id: uid(), name, history: kept, model: document.getElementById('chat-model')?.value || 'claude-sonnet-4-6' };
+  const newConv = { id: uid(), name, history: kept, model: document.getElementById('chat-model')?.value || DEFAULT_MODEL };
   conversations.push(newConv);
   currentConvId = newConv.id;
   save(); renderConvList(); renderMessages();
@@ -5364,7 +5374,7 @@ function doImport(f) {
       if (Array.isArray(s.history)) {
         // 舊格式：直接單筆匯入為新對話
         if (!confirm(`匯入「${s.convName||'對話'}」為新的對話窗口？`)) return;
-        const conv={id:uid(),name:s.convName||'匯入的對話',history:s.history,model:document.getElementById('chat-model')?.value||'claude-sonnet-4-6'};
+        const conv={id:uid(),name:s.convName||'匯入的對話',history:s.history,model:document.getElementById('chat-model')?.value||DEFAULT_MODEL};
         conversations.push(conv);
         currentConvId=conv.id;
         if (s.charName && !charName) charName=s.charName;
@@ -5428,7 +5438,7 @@ document.getElementById('import-confirm').addEventListener('click', () => {
         name: cv.name || '匯入的對話',
         history: cv.history || [],
         archive: cv.archive || [],
-        model: cv.model || 'claude-sonnet-4-6'
+        model: migrateModelId(cv.model)
       });
       importedCount++;
     } else if (it.type === 'msg-current') {
@@ -5438,7 +5448,7 @@ document.getElementById('import-confirm').addEventListener('click', () => {
         name: '匯入的聊天',
         history: it.data,
         archive: [],
-        model: 'claude-sonnet-4-6'
+        model: DEFAULT_MODEL
       });
       importedCount++;
     } else if (it.type === 'msg-archive') {
@@ -5449,7 +5459,7 @@ document.getElementById('import-confirm').addEventListener('click', () => {
         name: `匯入的聊天（${a.startTime}）`,
         history: a.history || [],
         archive: [],
-        model: 'claude-sonnet-4-6'
+        model: DEFAULT_MODEL
       });
       importedCount++;
     }
