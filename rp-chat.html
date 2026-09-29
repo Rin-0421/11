@@ -572,17 +572,8 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
           <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
           <option value="claude-sonnet-4-6" selected>Sonnet 4.6</option>
           <option value="claude-opus-4-6">Opus 4.6</option>
-          <option value="claude-opus-5">Opus 5</option>
-        </optgroup>
-        <optgroup label="DeepSeek">
-          <option value="deepseek-v4-pro">DS V4 Pro</option>
-          <option value="deepseek-v4-flash-vision-exp">DS V4 Vision</option>
-        </optgroup>
-      </select>
-    </div>
-  </div>
-
-  <div id="messages"></div>
+          <option value="claude-opus-5-5::low">Opus 5.5（低）</option>
+          <option value="claude-opus-5-5::medium">Opus 5.5（中）</option>
 
   <div class="input-area">
     <div id="file-preview"></div>
@@ -611,13 +602,8 @@ details[open] .thinking-summary::before { transform: rotate(90deg); }
           <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
           <option value="claude-sonnet-4-6" selected>Sonnet 4.6</option>
           <option value="claude-opus-4-6">Opus 4.6</option>
-          <option value="claude-opus-5">Opus 5</option>
-        </optgroup>
-        <optgroup label="DeepSeek">
-          <option value="deepseek-v4-pro">DS V4 Pro</option>
-          <option value="deepseek-v4-flash-vision-exp">DS V4 Vision</option>
-        </optgroup>
-      </select>
+          <option value="claude-opus-5-5::low">Opus 5.5（低）</option>
+          <option value="claude-opus-5-5::medium">Opus 5.5（中）</option>
       <button class="think-toggle" id="msg-end-btn" title="結束對話" style="font-size:11px">結束</button>
     </div>
   </div>
@@ -1212,6 +1198,12 @@ function currentConv() { return conversations.find(c => c.id === currentConvId);
 function isDeepSeek(model) { return model.startsWith('deepseek-'); }
 function isDeepSeekVision(model) { return model === 'deepseek-v4-flash-vision-exp'; }
 function isOpenAI(model) { return model.startsWith('gpt-') || model.startsWith('o1') || model.startsWith('o3'); }
+// Opus 5.5 在選單裡固定拆成「低」「中」兩個項目，value 用 "claude-opus-5-5::low" / "::medium" 編碼，
+// 真正打 API 時要拆開：model 只送 "::" 前面的真實模型 id，effort 直接用後面固定的字串，
+// 不受畫面上的思考開關或 Settings 裡的 effort 選單影響（Opus 5.5 本來就不能關閉思考）。
+function isOpus55(model) { return model.startsWith('claude-opus-5-5::'); }
+function resolveApiModel(model) { const i = model.indexOf('::'); return i === -1 ? model : model.slice(0, i); }
+function resolveEffortOverride(model) { const i = model.indexOf('::'); return i === -1 ? null : model.slice(i + 2); }
 function getKey(model) {
   if (isDeepSeek(model)) return dsKey;
   if (isOpenAI(model)) return oaiKey;
@@ -1611,6 +1603,7 @@ document.getElementById('search-toggle').addEventListener('click', () => {
 });
 document.getElementById('think-toggle').addEventListener('click', () => {
   const model = document.getElementById('chat-model').value;
+  if (isOpus55(model)) { alert('Opus 5.5 的思考無法關閉，效果強度已經由選單裡的「低／中」版本固定，不需要另外切換。'); return; }
   if (!thinkingEnabled && (model==='claude-haiku-4-5-20251001' || isOpenAI(model))) {
     alert(isOpenAI(model) ? 'OpenAI 模型不支援延伸思考。' : '延伸思考不支援 Haiku，請先切換模型。'); return;
   }
@@ -1618,7 +1611,10 @@ document.getElementById('think-toggle').addEventListener('click', () => {
 });
 document.getElementById('chat-model').addEventListener('change', () => {
   const model = document.getElementById('chat-model').value;
-  if (thinkingEnabled && (model==='claude-haiku-4-5-20251001' || isOpenAI(model))) {
+  if (isOpus55(model)) {
+    // Opus 5.5 一律開著思考，圖示跟著顯示成「開」，效果強度已經固定在選單版本裡
+    thinkingEnabled = true; updateThinkBtn();
+  } else if (thinkingEnabled && (model==='claude-haiku-4-5-20251001' || isOpenAI(model))) {
     thinkingEnabled=false; updateThinkBtn();
     alert(isOpenAI(model) ? '已自動關閉延伸思考（OpenAI 不支援）' : '已自動關閉延伸思考（Haiku 不支援）');
   }
@@ -2795,8 +2791,10 @@ async function generateProactive(conv) {
       reply = await runOpenAIWithToolsNonStream(oaiMessages, body, headers, url);
     } else {
       // Claude：明確關閉思考；system + 歷史都做快取，並提供健康工具
+      // （Opus 5.5 例外：它不能關閉思考，改成照選單裡固定的低/中效果跑）
       const claudeMessages = addHistoryCacheBreakpoint(apiMessages);
-      body = { model, max_tokens: 2000 };
+      body = { model: resolveApiModel(model), max_tokens: 2000 };
+      if (isOpus55(model)) { body.thinking = { type: 'adaptive' }; body.effort = resolveEffortOverride(model); }
       if (sys) body.system = [{ type:'text', text:sys, cache_control:{ type:'ephemeral', ttl:'1h' } }];
       const _tools = [...getHealthTools(), ...getCalendarTools()];
       if (_tools.length) body.tools = _tools;
@@ -3321,9 +3319,12 @@ async function regenerateAssistantMsg() {
       url = 'https://api.openai.com/v1/chat/completions';
     } else {
       claudeMessages = addHistoryCacheBreakpoint(apiMessages);
-      body = { model, max_tokens: thinkingEnabled ? 16000 : 2048, stream: true };
+      body = { model: resolveApiModel(model), max_tokens: (thinkingEnabled || isOpus55(model)) ? 16000 : 2048, stream: true };
       if (sys) body.system = [{ type:'text', text:sys, cache_control:{ type:'ephemeral', ttl:'1h' } }];
-      if (thinkingEnabled) {
+      if (isOpus55(model)) {
+        // Opus 5.5 不能關閉思考，效果強度固定用選單裡編碼的低/中，不受思考開關或 Settings 的 effort 設定影響
+        body.thinking = { type: 'adaptive' }; body.effort = resolveEffortOverride(model);
+      } else if (thinkingEnabled) {
         if (model === 'claude-haiku-4-5-20251001') { body.thinking = { type:'enabled', budget_tokens:10000 }; }
         else { body.thinking = { type:'adaptive' }; body.effort = effortLevel; }
       } else if (model !== 'claude-haiku-4-5-20251001') {
@@ -3546,9 +3547,11 @@ async function sendMsg() {
       url = 'https://api.openai.com/v1/chat/completions';
     } else {
       claudeMessages = addHistoryCacheBreakpoint(apiMessages);
-      body = { model, max_tokens: thinkingEnabled ? 16000 : 2048, stream: true };
+      body = { model: resolveApiModel(model), max_tokens: (thinkingEnabled || isOpus55(model)) ? 16000 : 2048, stream: true };
       if (sys) body.system = [{ type:'text', text:sys, cache_control:{ type:'ephemeral', ttl:'1h' } }];
-      if (thinkingEnabled) {
+      if (isOpus55(model)) {
+        body.thinking = { type: 'adaptive' }; body.effort = resolveEffortOverride(model);
+      } else if (thinkingEnabled) {
         if (model === 'claude-haiku-4-5-20251001') { body.thinking = { type:'enabled', budget_tokens:10000 }; }
         else { body.thinking = { type:'adaptive' }; body.effort = effortLevel; }
       } else if (model !== 'claude-haiku-4-5-20251001') {
@@ -3794,7 +3797,9 @@ setTimeout(() => {
     msgModelSel.addEventListener('change', (e) => {
       msgModel = e.target.value;
       // 檢查思考/搜尋相容性
-      if (thinkingEnabled && (msgModel==='claude-haiku-4-5-20251001' || isOpenAI(msgModel))) {
+      if (isOpus55(msgModel)) {
+        thinkingEnabled = true; updateThinkBtn(); updateMsgThinkBtn();
+      } else if (thinkingEnabled && (msgModel==='claude-haiku-4-5-20251001' || isOpenAI(msgModel))) {
         thinkingEnabled=false; updateThinkBtn(); updateMsgThinkBtn();
         alert(isOpenAI(msgModel) ? '已自動關閉延伸思考（OpenAI 不支援）' : '已自動關閉延伸思考（Haiku 不支援）');
       }
@@ -3803,7 +3808,8 @@ setTimeout(() => {
   }
   if (msgThinkBtn) {
     msgThinkBtn.addEventListener('click', () => {
-      const model = mainModelSel.value;
+      const model = msgModel;
+      if (isOpus55(model)) { alert('Opus 5.5 的思考無法關閉，效果強度已經由選單裡的「低／中」版本固定，不需要另外切換。'); return; }
       if (!thinkingEnabled && (model==='claude-haiku-4-5-20251001' || isOpenAI(model))) {
         alert(isOpenAI(model) ? 'OpenAI 模型不支援延伸思考。' : '延伸思考不支援 Haiku。'); return;
       }
@@ -4585,9 +4591,11 @@ async function send() {
     } else {
       // Claude 用 Anthropic 格式：system prompt + 對話歷史都做 Prompt Caching，並提供健康資料工具讓模型自己選擇要不要查
       claudeMessages = addHistoryCacheBreakpoint(apiMessages);
-      body = { model, max_tokens: thinkingEnabled?16000:2048, stream: true };
+      body = { model: resolveApiModel(model), max_tokens: (thinkingEnabled||isOpus55(model))?16000:2048, stream: true };
       if (sys) body.system = [{ type:'text', text:sys, cache_control:{ type:'ephemeral', ttl:'1h' } }];
-      if (thinkingEnabled) {
+      if (isOpus55(model)) {
+        body.thinking = { type: 'adaptive' }; body.effort = resolveEffortOverride(model);
+      } else if (thinkingEnabled) {
         if (model === 'claude-haiku-4-5-20251001') { body.thinking = { type:'enabled', budget_tokens:10000 }; }
         else { body.thinking = { type:'adaptive' }; body.effort = effortLevel; }
       } else if (model !== 'claude-haiku-4-5-20251001') {
@@ -4843,9 +4851,11 @@ async function regenerateFrom(historyIdx) {
       url=useDS?'https://api.deepseek.com/chat/completions':'https://api.openai.com/v1/chat/completions';
     } else {
       claudeMessages = addHistoryCacheBreakpoint(apiMessages);
-      body={model,max_tokens:thinkingEnabled?16000:2048,stream:true};
+      body={model:resolveApiModel(model),max_tokens:(thinkingEnabled||isOpus55(model))?16000:2048,stream:true};
       if (sys) body.system=[{type:'text',text:sys,cache_control:{type:'ephemeral',ttl:'1h'}}];
-      if (thinkingEnabled) {
+      if (isOpus55(model)) {
+        body.thinking={type:'adaptive'}; body.effort=resolveEffortOverride(model);
+      } else if (thinkingEnabled) {
         if (model === 'claude-haiku-4-5-20251001') { body.thinking={type:'enabled',budget_tokens:10000}; }
         else { body.thinking={type:'adaptive'}; body.effort=effortLevel; }
       } else if (model !== 'claude-haiku-4-5-20251001') {
