@@ -5003,7 +5003,14 @@ async function doStream(res, useDS, useOAI, onThink, onReply) {
           if (d.usage) usage = { inputTokens: d.usage.prompt_tokens || 0, outputTokens: d.usage.completion_tokens || 0, totalTokens: d.usage.total_tokens || 0 };
         } else {
           if (d.type === 'message_start') {
-            if (d.message?.usage) usage = { inputTokens: d.message.usage.input_tokens || 0, outputTokens: d.message.usage.output_tokens || 0, totalTokens: (d.message.usage.input_tokens||0)+(d.message.usage.output_tokens||0) };
+            if (d.message?.usage) {
+              // 有開 prompt caching 時，input_tokens 只剩「最後一個快取斷點之後」的少量 token，
+              // 真正的完整請求大小要把 cache_read / cache_creation 的 token 一起加回來，
+              // 不然壓縮門檻會一直被低估，Claude 的對話永遠不會觸發自動壓縮。
+              const _u = d.message.usage;
+              const _fullIn = (_u.input_tokens||0) + (_u.cache_creation_input_tokens||0) + (_u.cache_read_input_tokens||0);
+              usage = { inputTokens: _fullIn, outputTokens: _u.output_tokens || 0, totalTokens: _fullIn + (_u.output_tokens||0) };
+            }
           } else if (d.type === 'content_block_start') {
             claudeBlockType = d.content_block?.type;
             if (claudeBlockType === 'tool_use') {
