@@ -2810,7 +2810,7 @@ async function generateProactive(conv) {
       // （Opus 5.5 例外：它不能關閉思考，改成照選單裡固定的低/中效果跑）
       const claudeMessages = addHistoryCacheBreakpoint(apiMessages);
       body = { model: resolveApiModel(model), max_tokens: 2000 };
-      if (isOpus55(model)) { body.thinking = { type: 'adaptive' }; body.effort = resolveEffortOverride(model); }
+      if (isOpus55(model)) { body.thinking = { type: 'adaptive' }; body.output_config = { effort: resolveEffortOverride(model) }; }
       if (sys) body.system = [{ type:'text', text:sys, cache_control:{ type:'ephemeral', ttl:'1h' } }];
       const _tools = [...getHealthTools(), ...getCalendarTools()];
       if (_tools.length) body.tools = _tools;
@@ -3339,7 +3339,7 @@ async function regenerateAssistantMsg() {
       if (sys) body.system = [{ type:'text', text:sys, cache_control:{ type:'ephemeral', ttl:'1h' } }];
       if (isOpus55(model)) {
         // Opus 5.5 不能關閉思考，效果強度固定用選單裡編碼的低/中，不受思考開關或 Settings 的 effort 設定影響
-        body.thinking = { type: 'adaptive' }; body.effort = resolveEffortOverride(model);
+        body.thinking = { type: 'adaptive' }; body.output_config = { effort: resolveEffortOverride(model) };
       } else if (thinkingEnabled) {
         if (model === 'claude-haiku-4-5-20251001') { body.thinking = { type:'enabled', budget_tokens:10000 }; }
         else { body.thinking = { type:'adaptive' }; body.effort = effortLevel; }
@@ -3566,7 +3566,7 @@ async function sendMsg() {
       body = { model: resolveApiModel(model), max_tokens: (thinkingEnabled || isOpus55(model)) ? 16000 : 2048, stream: true };
       if (sys) body.system = [{ type:'text', text:sys, cache_control:{ type:'ephemeral', ttl:'1h' } }];
       if (isOpus55(model)) {
-        body.thinking = { type: 'adaptive' }; body.effort = resolveEffortOverride(model);
+        body.thinking = { type: 'adaptive' }; body.output_config = { effort: resolveEffortOverride(model) };
       } else if (thinkingEnabled) {
         if (model === 'claude-haiku-4-5-20251001') { body.thinking = { type:'enabled', budget_tokens:10000 }; }
         else { body.thinking = { type:'adaptive' }; body.effort = effortLevel; }
@@ -4610,7 +4610,7 @@ async function send() {
       body = { model: resolveApiModel(model), max_tokens: (thinkingEnabled||isOpus55(model))?16000:2048, stream: true };
       if (sys) body.system = [{ type:'text', text:sys, cache_control:{ type:'ephemeral', ttl:'1h' } }];
       if (isOpus55(model)) {
-        body.thinking = { type: 'adaptive' }; body.effort = resolveEffortOverride(model);
+        body.thinking = { type: 'adaptive' }; body.output_config = { effort: resolveEffortOverride(model) };
       } else if (thinkingEnabled) {
         if (model === 'claude-haiku-4-5-20251001') { body.thinking = { type:'enabled', budget_tokens:10000 }; }
         else { body.thinking = { type:'adaptive' }; body.effort = effortLevel; }
@@ -4870,7 +4870,7 @@ async function regenerateFrom(historyIdx) {
       body={model:resolveApiModel(model),max_tokens:(thinkingEnabled||isOpus55(model))?16000:2048,stream:true};
       if (sys) body.system=[{type:'text',text:sys,cache_control:{type:'ephemeral',ttl:'1h'}}];
       if (isOpus55(model)) {
-        body.thinking={type:'adaptive'}; body.effort=resolveEffortOverride(model);
+        body.thinking={type:'adaptive'}; body.output_config={effort:resolveEffortOverride(model)};
       } else if (thinkingEnabled) {
         if (model === 'claude-haiku-4-5-20251001') { body.thinking={type:'enabled',budget_tokens:10000}; }
         else { body.thinking={type:'adaptive'}; body.effort=effortLevel; }
